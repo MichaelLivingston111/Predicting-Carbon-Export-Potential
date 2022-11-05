@@ -1,0 +1,82 @@
+---
+title: "Model_Visualization"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Load required packages:
+```{r}
+
+
+suppressMessages(library(ggplot2))
+suppressMessages(library(caret))
+suppressMessages(library(ggpubr))
+suppressMessages(library(MuMIn))
+suppressMessages(library(lme4))
+suppressMessages(library(feather))
+suppressMessages(library(arrow))
+suppressMessages(library(dplyr))
+suppressMessages(library(viridis))
+suppressMessages(library(scatterplot3d))
+suppressMessages(library(graph3d))
+suppressMessages(library(plot3D))
+
+```
+
+
+# Load the data:
+```{r}
+
+# Upload the data from a total data file:
+total_data <- read.csv("MODEL_DATA.csv")
+global_data <- read.csv("MODEL_DATA_GLOBAL.csv")
+
+
+```
+
+
+# Make a basic 3D visualization between the most important parameters:
+```{r}
+
+scatterplot3d(x = global_data$Log_Chl, y = global_data$Temperature, z = global_data$TEP, pch = 16,
+              xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP")
+
+
+```
+
+# Visualize a multivariate regression with Temperature + Chl on the above plot:
+```{r}
+
+#colors <- c("red", "black")
+#colors <- colors(global_data$Bloom)
+
+SP3D <- scatterplot3d(x = global_data$Log_Chl, y = global_data$Temperature, z = global_data$TEP, pch = 16,
+              xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP",
+              angle = 55)  # type = 'h' will add vertical line points
+
+# Add regression plane
+my.lm <- lm(global_data$TEP ~ global_data$Log_Chl + global_data$Temperature)
+SP3D$plane3d(my.lm, draw_polygon = FALSE, draw_lines = TRUE)
+
+# Legend
+#legend("right", legend = levels(as.numeric(global_data$Bloom)),
+      #col =  c("red", "black"), pch = 16)
+
+
+
+```
+
+
+```{r}
+
+global_data  %>% 
+  scatter3D(x = Log_Chl, y = Temperature, 
+            z = TEP, col = ramp.col(csbaPal[2:5]))
+
+
+```
+
