@@ -34,8 +34,6 @@ suppressMessages(library(MuMIn))
 ```
 
 
-
-
 # Input the relevant data sets: Regional and global (Regional + Arctic)
 ```{r}
 

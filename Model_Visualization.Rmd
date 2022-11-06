@@ -65,7 +65,7 @@ SP3D <- scatterplot3d(x = global_data$Log_Chl, y = global_data$Temperature, z = 
 
 # Add regression plane
 my.lm <- lm(global_data$TEP ~ global_data$Log_Chl + global_data$Temperature)
-SP3D$plane3d(my.lm, draw_polygon = FALSE, draw_lines = TRUE)
+SP3D$plane3d(my.lm, draw_polygon = FALSE, draw_lines = TRUE, lty.box = 'solid')
 
 # Legend
 #legend("right", legend = levels(as.numeric(global_data$Bloom)),
@@ -128,7 +128,7 @@ z.pred = matrix(predict(fit, newdata = xy),
 fitpoints = predict(fit)
 
 global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 18, cex = 1,
-                     theta = 35, phi = 10, ticktype = "detailed",
+                     theta = 45, phi = 25, ticktype = "detailed",
                      surf = list(x = x.pred, y = y.pred, z = z.pred,
                                  facets = NA, fit = fitpoints),
                      xlab = "Chlorophyll a (log-scaled)", 
