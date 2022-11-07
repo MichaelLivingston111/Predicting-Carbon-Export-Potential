@@ -53,106 +53,66 @@ scatterplot3d(x = global_data$Log_Chl, y = global_data$Temperature, z = global_d
 
 ```
 
-# Visualize a multivariate regression with Temperature + Chl on the above plot:
+
+# Make a more advanced 3D visualization between the most important parameters:
 ```{r}
 
-#colors <- c("red", "black")
-#colors <- colors(global_data$Bloom)
-
-SP3D <- scatterplot3d(x = global_data$Log_Chl, y = global_data$Temperature, z = global_data$TEP, pch = 16,
-              xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP",
-              angle = 45)  # type = 'h' will add vertical line points
-
-# Add regression plane
-my.lm <- lm(global_data$TEP ~ global_data$Log_Chl + global_data$Temperature)
-SP3D$plane3d(my.lm, draw_polygon = FALSE, draw_lines = TRUE, lty.box = 'solid')
-
-# Legend
-#legend("right", legend = levels(as.numeric(global_data$Bloom)),
-      #col =  c("red", "black"), pch = 16)
-
-
-
-```
-
-
-```{r}
-
-csbaPal = c("#16325B", "#0072B4", "#00B0E0", "#007236", "#00AE62",
-            "#8FB063", "#9D0817", "#4A0C61", "#6E60AA", "#AB9F3")
-
-scatter3D(x = global_data$Log_Chl, y = global_data$Temperature, 
-            z = global_data$TEP, col = ramp.col(csbaPal[2:5]))
-
-# Create grid matrix of predictions
-grid.lines = 26 # vis parameter
-
-x.pred = seq(min(global_data$Log_Chl), 
-             max(global_data$Log_Chl), length.out= grid.lines)
-y.pred = seq(min(global_data$Temperature), 
-             max(global_data$Temperature), length.out = grid.lines)
-xy = expand.grid(Log_Chl = x.pred, 
-                 Temperature = y.pred)
-
-z.pred = matrix(predict(my.lm, newdata = xy), 
-                nrow = grid.lines, ncol = grid.lines)
-
-fitpoints = predict(my.lm)
-
-
-scatter3D(x = Log_Chl, y = Temperature, z = TEP,
-          pch = 18, cex = 2, theta = 20, phi = 20, ticktype = "detailed",
-                     surf = list(x = x.pred, y = y.pred, z = z.pred,
-                                 facets = NA, fit = fitpoints))
-
-
-```
-
-```{r}
-
-# Create the model:
+# Create the model to visualize:
 global_data %>% lm(TEP ~ Log_Chl + Temperature, data = .) -> fit
 
-grid.lines = 26 #vis parameter
+grid.lines = 20 # vis parameter
 
+# Grid parameters:
 x.pred = seq(min(global_data$Log_Chl), 
              max(global_data$Log_Chl), length.out= grid.lines)
+
 y.pred = seq(min(global_data$Temperature), 
              max(global_data$Temperature), length.out = grid.lines)
+
 xy = expand.grid(Log_Chl = x.pred, 
                  Temperature = y.pred)
 
 z.pred = matrix(predict(fit, newdata = xy), 
                 nrow = grid.lines, ncol = grid.lines)
 
+# Prediction points:
 fitpoints = predict(fit)
 
-global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 18, cex = 1,
-                     theta = 45, phi = 25, ticktype = "detailed",
-                     surf = list(x = x.pred, y = y.pred, z = z.pred,
-                                 facets = NA, fit = fitpoints),
-                     xlab = "Chlorophyll a (log-scaled)", 
-                     ylab = "Temperature (˚C)", zlab = "TEP",
-                     bty = 'g')
+
+# Visualization 1:
+global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 19, cex = 0.5, 
+                  theta = 35, phi = 15, bty="b", colvar=FALSE, col="red",
+                  expand = 0.7, 
+                  xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", 
+                  zlab = "TEP", clab = "TEP",
+                  surf = list(x = x.pred, y = y.pred, z = z.pred,  
+                                facets = NA, fit = fitpoints, col = "black"))
 
 
 
-# Another view
-global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 18, cex = 1, colvar=FALSE, col="red", theta = 25, phi = 20, bty="u",
+# Visualization 2:
+global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 18, cex = 1, 
+                    colvar=FALSE, col="red", theta = 25, phi = 20, bty="u",
                     col.panel ="azure2", expand =0.5, col.grid = "snow",
                     xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP",  
                     surf = list(x = x.pred, y = y.pred, z = z.pred,  
-                    facets = TRUE, col=ramp.col (col = c("yellow","darkorange"), n = 100, alpha=0.7), fit = fitpoints,  
-                    border="black"))
+                    facets = TRUE, col=ramp.col (col = c("yellow","darkorange"), 
+                                n = 100, alpha=0.7), fit = fitpoints, border="black"))
 
 
-# And another view:
-global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 19, cex = 0.5, colvar=FALSE, 
-                  col="black", theta = 35, phi = 0, bty="b2",
+# Visualization 3:
+global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 19, cex = 0.5, 
+                  theta = 35, phi = 15, bty="b",
                   expand =0.7, 
-                  xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP",
+                  xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", 
+                  zlab = "TEP", clab = "TEP",
                   surf = list(x = x.pred, y = y.pred, z = z.pred,  
-                      facets = NA, col ="red", fit = fitpoints ))
+                                facets = NA, fit = fitpoints),
+                  colkey = list(side = 4, length = 0.7, width = 0.5, 
+                                line.clab = 0.5, adj.clab = 0, dist = -0.05))
+
+
+
 
 ```
 
