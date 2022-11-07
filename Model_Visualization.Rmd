@@ -113,7 +113,7 @@ scatter3D(x = Log_Chl, y = Temperature, z = TEP,
 # Create the model:
 global_data %>% lm(TEP ~ Log_Chl + Temperature, data = .) -> fit
 
-grid.lines = 16 #vis parameter
+grid.lines = 26 #vis parameter
 
 x.pred = seq(min(global_data$Log_Chl), 
              max(global_data$Log_Chl), length.out= grid.lines)
@@ -135,6 +135,24 @@ global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 18, cex = 1,
                      ylab = "Temperature (˚C)", zlab = "TEP",
                      bty = 'g')
 
+
+
+# Another view
+global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 18, cex = 1, colvar=FALSE, col="red", theta = 25, phi = 20, bty="u",
+                    col.panel ="azure2", expand =0.5, col.grid = "snow",
+                    xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP",  
+                    surf = list(x = x.pred, y = y.pred, z = z.pred,  
+                    facets = TRUE, col=ramp.col (col = c("yellow","darkorange"), n = 100, alpha=0.7), fit = fitpoints,  
+                    border="black"))
+
+
+# And another view:
+global_data %$% scatter3D(Log_Chl, Temperature, TEP, pch = 19, cex = 0.5, colvar=FALSE, 
+                  col="black", theta = 35, phi = 0, bty="b2",
+                  expand =0.7, 
+                  xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP",
+                  surf = list(x = x.pred, y = y.pred, z = z.pred,  
+                      facets = NA, col ="red", fit = fitpoints ))
 
 ```
 
