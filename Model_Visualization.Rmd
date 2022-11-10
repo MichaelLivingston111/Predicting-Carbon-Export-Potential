@@ -25,6 +25,7 @@ suppressMessages(library(scatterplot3d))
 suppressMessages(library(graph3d))
 suppressMessages(library(plot3D))
 suppressMessages(library(magrittr))
+suppressMessages(library(scales))
 
 ```
 
@@ -128,6 +129,40 @@ ggplot(global_data, aes(Temperature, TEP, colour = as.factor(Bloom))) +
 summary(lm(TEP ~ Temperature + Bloom, data = global_data))
 
 
+
+```
+
+
+# Quick comparison between datasets:
+```{r}
+
+# Upload the data from a total data file:
+OG_data <- read.csv("MODEL_DATA_GLOBAL.csv")
+NEW_data <- read.csv("MODEL_DATA_GLOBAL_FINAL.csv")
+
+
+
+ggplot(OG_data, aes(Log_Chl, TEP, color = Area)) +
+  geom_point()
+summary(lm(TEP ~ Chl, data = OG_data))
+
+
+ggplot(NEW_data, aes(Chl, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  #ylim(0, 150) +
+  annotation_logticks(sides = 'b')
+
+
+ggplot(NEW_data, aes(Chl, TEP)) +
+  geom_point() +
+  geom_smooth() +
+  ylim(0, 150) +
+  annotation_logticks(sides = 'b')
+
+summary(lm(TEP ~ Chl, data = NEW_data))
 
 ```
 
