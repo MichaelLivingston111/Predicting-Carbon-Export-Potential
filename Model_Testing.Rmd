@@ -76,6 +76,10 @@ Read_fn <- function(file) {
 regional_data <- Read_fn("MODEL_DATA.csv")  # Regional
 global_data <- Read_fn("MODEL_DATA_GLOBAL.csv")  # Global
 
+# Input a testing dataset:
+test_data <- read.csv("Arctic_2022.csv") %>% 
+    mutate(Bloom = if_else(Chl > 2.5, 1, 0))
+
 ```
 
 
@@ -338,7 +342,7 @@ CrossValPlot <- function(model, data){
   MAE <- MAE(data$Predictions, data$TEP)
   MAE <- format(round(MAE, 2), nsmall = 2)
   
-  crossvalplot <- ggplot(data, aes(TEP, Predictions)) +
+  crossvalplot <- ggplot(data, aes(TEP, Predictions, color = Area)) +
     geom_point(alpha = 1, size = 2, pch = 1) +
     ylab("Predicted TEP") +
     xlab("Measured TEP") +
@@ -346,7 +350,7 @@ CrossValPlot <- function(model, data){
     #scale_color_manual(values = c("royalblue", "black")) +
     #scale_color_viridis() +
     geom_smooth(method = 'lm', se = FALSE, color = 'red') +
-    facet_wrap(~Area) +
+    #facet_wrap(~Area) +
     ylim(0, 150) +
     #geom_label(aes(25, 130, label=paste("R squared: ", Rsq,
                       # "\nMean absolute error: ", MAE)), color = 'black') +
@@ -372,3 +376,47 @@ Applied_model <- LM_list[[6]]
 summary(Applied_model)
 
 ```
+
+
+# Validate the model using entirely new data from the Arctic (Oct, 2022)
+```{r}
+
+
+# Select a model that contains only the available parameters from the test 
+# data set:
+Test_model <- Chl_Temp_Bloom_LM
+
+# Create a column of new predictions:
+test_data$predicted_tep <- predict(Test_model, test_data)
+test_data$predicted_tep[test_data$predicted_tep < 0] <- 0
+
+ggplot(test_data, aes(TEP, predicted_tep)) +
+    geom_point(alpha = 1, size = 2, pch = 1) +
+    ylab("Predicted TEP") +
+    xlab("Measured TEP") +
+    ylim(0, 150) +
+    xlim(0, 150) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    geom_smooth(method = 'lm', se = FALSE, color = 'red') +
+    theme(legend.title = element_blank()) +
+    theme_bw()
+
+
+# Use the functions above to test the accuracy of the model when the new data 
+# is included (i.e. final dataset)
+
+final_data <- read.csv("MODEL_DATA_GLOBAL_FINAL.csv") %>% 
+    mutate(Bloom = if_else(Chl > 2.5, 1, 0)) %>% 
+    select(TEP, Log_Chl, Temperature, Bloom, Arctic)
+
+
+# Train the selected model using train control functions above:
+Final_test_model <- train(TEP ~ Log_Chl + Temperature + Arctic + Bloom, 
+                         data = final_data, method = "lm",
+                         trControl = train.control.LOOCV)
+
+ModelCrossVal(Final_test_model, final_data)
+CrossValPlot(Final_test_model, final_data)
+
+```
+
