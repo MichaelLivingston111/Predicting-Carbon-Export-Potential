@@ -294,7 +294,7 @@ ModelVal(LM_list[[6]], global_data)
 # Define the cross validation functions:
 train.control.LOOCV <- trainControl(method = "LOOCV")
 train.control.KFOLD <- trainControl(method = "repeatedcv", 
-                                    number = 10, repeats = 10)
+                                    number = 15, repeats = 10)
   
   
 
@@ -342,14 +342,14 @@ CrossValPlot <- function(model, data){
   MAE <- MAE(data$Predictions, data$TEP)
   MAE <- format(round(MAE, 2), nsmall = 2)
   
-  crossvalplot <- ggplot(data, aes(TEP, Predictions, color = Area)) +
-    geom_point(alpha = 1, size = 2, pch = 1) +
+  crossvalplot <- ggplot(data, aes(TEP, Predictions)) +
+    geom_point(alpha = 1, size = 2, pch = 16) +
     ylab("Predicted TEP") +
     xlab("Measured TEP") +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
     #scale_color_manual(values = c("royalblue", "black")) +
     #scale_color_viridis() +
-    geom_smooth(method = 'lm', se = FALSE, color = 'red') +
+    #geom_smooth(method = 'lm', se = FALSE, color = 'red') +
     #facet_wrap(~Area) +
     ylim(0, 150) +
     #geom_label(aes(25, 130, label=paste("R squared: ", Rsq,
@@ -405,13 +405,13 @@ ggplot(test_data, aes(TEP, predicted_tep)) +
 # Use the functions above to test the accuracy of the model when the new data 
 # is included (i.e. final dataset)
 
-final_data <- read.csv("MODEL_DATA_GLOBAL_FINAL.csv") %>% 
+final_data <- read.csv("MODEL_DATA_GLOBAL_FINAL2.csv") %>% 
     mutate(Bloom = if_else(Chl > 2.5, 1, 0)) %>% 
-    select(TEP, Log_Chl, Temperature, Bloom, Arctic)
+    select(TEP, Chl, Log_Chl, Temperature, Bloom, Arctic)
 
 
 # Train the selected model using train control functions above:
-Final_test_model <- train(TEP ~ Log_Chl + Temperature + Arctic + Bloom, 
+Final_test_model <- train(TEP ~ Chl + Temperature + Arctic + Bloom, 
                          data = final_data, method = "lm",
                          trControl = train.control.LOOCV)
 
