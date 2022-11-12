@@ -40,7 +40,9 @@ total_data <- read.csv("MODEL_DATA.csv")
 regional_data <- Read_fn("MODEL_DATA.csv")  # Regional
 global_data <- Read_fn("MODEL_DATA_GLOBAL.csv")  # Global
 
-
+final_data <- read.csv("MODEL_DATA_GLOBAL_FINAL.csv") %>% 
+    mutate(Bloom = if_else(Chl > 2.5, 1, 0)) %>% 
+    select(TEP, Chl, Log_Chl, Temperature, Bloom, Arctic, Area)
 
 ```
 
@@ -51,6 +53,9 @@ global_data <- Read_fn("MODEL_DATA_GLOBAL.csv")  # Global
 scatterplot3d(x = global_data$Log_Chl, y = global_data$Temperature, z = global_data$TEP, pch = 16,
               xlab = "Chlorophyll a (log-scale)", ylab = "Temperature (˚C)", zlab = "TEP")
 
+ggplot(final_data, aes(Log_Chl, TEP, colour = Area)) +
+  geom_point() +
+  geom_smooth(method = 'lm')
 
 ```
 
