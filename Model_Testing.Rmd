@@ -62,7 +62,7 @@ Read_fn <- function(file) {
   
   data <- data %>%  # Index out variables of interest
     select(TEP, Temperature, Season, Log_Chl, POC, Summer, 
-           Winter, Bloom, Arctic, Area, Depth)
+           Winter, Bloom, Arctic, Area, Depth, Chl)
   
   data <- na.omit(data)
   
@@ -386,6 +386,7 @@ summary(Applied_model)
 # data set:
 Test_model <- Chl_Temp_Bloom_LM
 
+
 # Create a column of new predictions:
 test_data$predicted_tep <- predict(Test_model, test_data)
 test_data$predicted_tep[test_data$predicted_tep < 0] <- 0
@@ -405,9 +406,9 @@ ggplot(test_data, aes(TEP, predicted_tep)) +
 # Use the functions above to test the accuracy of the model when the new data 
 # is included (i.e. final dataset)
 
-final_data <- read.csv("MODEL_DATA_GLOBAL_FINAL2.csv") %>% 
+final_data <- read.csv("MODEL_DATA_GLOBAL_FINAL.csv") %>% 
     mutate(Bloom = if_else(Chl > 2.5, 1, 0)) %>% 
-    select(TEP, Chl, Log_Chl, Temperature, Bloom, Arctic)
+    select(TEP, Chl, Log_Chl, Temperature, Bloom, Arctic, Area)
 
 
 # Train the selected model using train control functions above:
@@ -417,6 +418,32 @@ Final_test_model <- train(TEP ~ Chl + Temperature + Arctic + Bloom,
 
 ModelCrossVal(Final_test_model, final_data)
 CrossValPlot(Final_test_model, final_data)
+
+
+# Create more models and test validity:
+
+Test_lmer_model <- lmer(TEP ~ Log_Chl + Temperature + Bloom + (1+Log_Chl|Area), 
+                         data = final_data)
+Test_lmer_model_2 <- lmer(TEP ~ Log_Chl + Temperature + Bloom + (1|Area), 
+                         data = final_data)
+Test_lm_model <- lm(TEP ~ Log_Chl + Temperature + Bloom + Arctic, 
+                         data = final_data)
+Test_lm_model_1 <- lm(TEP ~ Log_Chl, 
+                         data = final_data)
+Test_lm_model_2 <- lm(TEP ~ Log_Chl + Temperature, 
+                         data = final_data)
+Test_lm_model_3 <- lm(TEP ~ Log_Chl + Temperature + Bloom, 
+                         data = final_data)
+Test_lm_model_4 <- lm(TEP ~ Log_Chl + Temperature + Arctic, 
+                         data = final_data)
+
+
+AIC(Test_lm_model, Test_lmer_model, Test_lmer_model_2, Test_lm_model_1, Test_lm_model_2, Test_lm_model_3, Test_lm_model_4)
+AIC(Test_lm_model, Test_lmer_model)
+
+summary(Test_lmer_model)
+
+
 
 ```
 
