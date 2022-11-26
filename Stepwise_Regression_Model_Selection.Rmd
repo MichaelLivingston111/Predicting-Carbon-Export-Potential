@@ -22,6 +22,7 @@ suppressMessages(library(dplyr))
 suppressMessages(library(viridis))
 suppressMessages(library(grid))
 suppressMessages(library(car))
+suppressMessages(library(MASS))
 
 ```
 
@@ -79,56 +80,77 @@ data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL.csv")[1])
 ```
 
 
-# Step-wise Regressions models: Both forward and backward sequences for both types of models:
+# Compute a stepwise regression for variable selection:
 ```{r}
 
-# Define intercept-only model
-intercept_only <- lm(TEP ~ 1, data = UpperMixed_data)  # linear
-intercept_lmer <- lmer(TEP ~ 1 + (1|Season), data = UpperMixed_data)  # mixed effects
+full.model <- lm(TEP ~ ., data)  # define a model with all parameters
 
-# Define model with all predictors
-all <- lm(TEP ~ ., data = UpperMixed_data)  # linear
-all_lmer <- lmer(TEP ~ . + (1|Season), data = UpperMixed_data)  # mixed effects
+# Create the stepwise regression
+step.model <- stepAIC(full.model, direction = "backward", 
+                      trace = FALSE)
+
+# View results:
+summary(step.model)
+step.model$anova
+step.model$coefficients
+plot(step.model$residuals ~ step.model$fitted.values)
+
+
+#create histogram of residuals
+ggplot(data = data, aes(x = step.model$residuals)) +
+    geom_histogram(fill = 'steelblue', color = 'black') +
+    labs(title = 'Histogram of Residuals', x = 'Residuals', y = 'Frequency')
+
+
+# Check assumptions:
+ModelVal(step.model, data)  # plots
+car::vif(step.model)  # multi-collinearity
+shapiro.test(resid(step.model))
+
+
+# In order to create the final model, we need to eliminate any parameters that are excessively correlated (i.e autocorrelation):
+model <- lm(TEP ~ Log_Chl + POC + DO + Temperature + MLD + Phosphate, data = data)
+summary(model)
+ModelVal(model, data)  # plots
+car::vif(model)  # multi-collinearity
+shapiro.test(resid(model))
 
 ```
 
-
-# Perform forward stepwise regression: Linear
 ```{r}
-forward <- step(intercept_only, direction='forward', scope=formula(all), trace=0)
-forward$anova
-forward$coefficients
 
-plot(forward$residuals ~ forward$fitted.values)
+# Define the cross validation functions:
+train.control.LOOCV <- trainControl(method = "LOOCV")
+train.control.KFOLD <- trainControl(method = "repeatedcv", 
+                                    number = 15, repeats = 10)
+  
+  
+
+# Train the selected model using train control functions above:
+preffered_model_LOOCV_full <- train(TEP ~ Log_Chl + POC + DO + Fluorescence + 
+                                 Temperature + MLD + Density + 
+                                 Silicate + Phosphate + Bloom,
+                                 data = data, method = 'lm', trControl = train.control.LOOCV)
+
+preffered_model_LOOCV_partial <- train(TEP ~ Log_Chl + DO + 
+                                 Temperature + MLD + 
+                                 Phosphate + Bloom,
+                                 data = data, method = 'lm', trControl = train.control.LOOCV)
+
+
+# Apply the cross validation functions (from previous file) to calculate and visualize accuracy metrics:
+ModelCrossVal(preffered_model_LOOCV_full, data)
+CrossValPlot(preffered_model_LOOCV_full, data)
+
+ModelCrossVal(preffered_model_LOOCV_partial, data)
+CrossValPlot(preffered_model_LOOCV_partial, data)
+
+
+AIC(model, step.model)
+
 
 ```
 
-
-# Perform backward stepwise regression
-```{r}
-
-# Perform backward stepwise regression
-backward <- step(all, direction ='backward', scope = formula(all), trace=0)
-backward$anova
-backward$coefficients
-
-plot(backward$residuals ~ backward$fitted.values)
-
-```
-
-
-# Perform both backward and forward stepwise regression
-```{r}
-
-# Perform backward stepwise regression
-both <- step(intercept_only, direction ='both', scope = formula(all), trace=0)
-both$anova
-both$coefficients
-
-plot(both$residuals ~ both$fitted.values)
-
-# This sequence comes to the same 'conclusions', or combinations of predictors, as the backwards regressions.
-```
 
 
 # Checking model assumptions: Equal variance and normal distribution of model residuals:
