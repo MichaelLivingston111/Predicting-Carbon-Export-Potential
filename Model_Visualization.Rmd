@@ -42,7 +42,7 @@ global_data <- Read_fn("MODEL_DATA_GLOBAL.csv")  # Global
 
 final_data <- read.csv("MODEL_DATA_GLOBAL_FINAL.csv") %>% 
     mutate(Bloom = if_else(Chl > 2.5, 1, 0)) %>% 
-    select(TEP, Chl, Log_Chl, Temperature, Bloom, Arctic, Area)
+    dplyr::select(TEP, Chl, Log_Chl, Temperature, Bloom, Arctic, Area)
 
 ```
 

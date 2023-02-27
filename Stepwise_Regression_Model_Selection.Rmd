@@ -8,7 +8,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-# Upload required libraries:
+# Packages:
 ```{r}
 
 suppressMessages(library(ggplot2))
@@ -23,13 +23,24 @@ suppressMessages(library(viridis))
 suppressMessages(library(grid))
 suppressMessages(library(car))
 suppressMessages(library(MASS))
+suppressMessages(library(olsrr))
+suppressMessages(library(ggpubr))
+suppressMessages(library(scales))
+suppressMessages(library(ggfortify))
+suppressMessages(library(jtools))
+suppressMessages(library(dotwhisker))
+suppressMessages(library(broom))
+suppressMessages(library(PerformanceAnalytics))
+suppressMessages(library(tidyverse))
+
+
 
 ```
 
 
 This code creates a series of both multivariate linear regression models and mixed effects models to predict the concentration of marine exopolymer gels important for both carbon sequestration in the ocean and the efficient functioning of desalination plants.
 
-# Upload all the data, and sort into workable dataframes:
+# Data upload:
 ```{r}
 
 # Upload the data from a total data file:
@@ -42,30 +53,65 @@ Read_fn <- function(file) {
   data <- read.csv(file)  # Read the csv
   
   data <- data %>% 
-    mutate(Bloom = if_else(Chl > 2.5, 1, 0))
+    mutate(Bloom = if_else(Chl > 5, 1, 0))
+  
+  data <- data %>% 
+    mutate(HBE = as.factor(if_else(Chl > 5, 'HBE', 'LBE')))
   
   
   # All variables of interest:
-  full_dataset <- data %>%  # Index out variables of interest
-    select(TEP, Log_Chl, POC, DO, Fluorescence, 
-           Temperature, MLD, Density,
-           Nitrate, Silicate, Phosphate,
-           Bloom, Arctic)
+  #full_dataset <- data %>%  # Index out variables of interest
+    #dplyr::select(TEP, Log_Chl, POC, DO, Fluorescence, 
+           #Temperature, MLD, Density,
+           #Nitrate, Silicate, Phosphate,
+           #Bloom, Arctic)
   
-  full_dataset <- na.omit(full_dataset)
+  #full_dataset <- na.omit(full_dataset)
   
   
-  # Maximum available variables of interest:
+  # Isolate variables of interest:
   partial_dataset <- data %>%  # Index out variables of interest
-    select(TEP, Log_Chl, POC, DO, Fluorescence, 
-           Temperature, MLD, Density,
+    dplyr::select(TEP, Log_Chl, POC, DO,
+           Temperature, MLD, Salinity, #PAR,
            Nitrate, Silicate, Phosphate,
-           Bloom, Arctic)
+           Bloom, Area, Seasons, WS)
   
   partial_dataset <- na.omit(partial_dataset)
   
+  
+  # Total dataset:
+  all_data <- data
+  
+  # Only Pacific data:
+  Pacific_data = partial_dataset[partial_dataset$Area=='ESNP', ]
+  Pacific_data = subset(Pacific_data, select=-c(Area))  # Remove redundant area variable
+  
+  # Only Arctic data:
+  # Arctic variables:
+  arctic_dataset <- data %>%  # Index out variables of interest
+    dplyr::select(TEP, Log_Chl, POC, 
+           Temperature, MLD, WS, # PAR
+           Silicate, Phosphate, Nitrate,
+           Bloom, Area, Seasons)
+  
+  Arctic_data = arctic_dataset[arctic_dataset$Area=='BS-CB', ]
+  Arctic_data = subset(Arctic_data, select=-c(Area))
+  Arctic_data <- na.omit(Arctic_data)
+  
+  
+  # Only Bering Strait data:
+  bering_dataset <- data %>%  # Index out variables of interest
+    dplyr::select(TEP, Log_Chl, POC, 
+           Nitrate, Phosphate, Silicate,
+           Temperature, MLD, WS, # PAR
+           Bloom, Area, Seasons)
+  
+  Bering_data = bering_dataset[bering_dataset$Area=='BE-CH', ]
+  Bering_data = subset(Bering_data, select=-c(Area))
+  Bering_data <- na.omit(Bering_data)
+  
   # Merge into a list:
-  dataset <- list(full_dataset, partial_dataset)
+  dataset <- list(partial_dataset, all_data, Pacific_data, Arctic_data, Bering_data)
 
   
   return(dataset)
@@ -74,16 +120,174 @@ Read_fn <- function(file) {
 
 
 # Input required files into function (from previous file):
-data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL.csv")[1])
+Pacific_data2 <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[3])
+Arctic_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[4])
+Bering_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[5])
+all_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[2])
 
 
 ```
 
 
-# Compute a stepwise regression for variable selection:
+# Define functions:
 ```{r}
 
-full.model <- lm(TEP ~ ., data)  # define a model with all parameters
+# Model assumptions:
+ModelVal <- function(model, data){
+  
+    # Get the model residuals and predictions:
+    resid <- resid(model)  # residuals
+    predicts <- predict(model)  # predictions
+    
+    
+
+    # Plot the distribution of the model residuals:
+    Histo <- ggplot(data, aes(resid)) + 
+      geom_histogram(binwidth = 0.5, colour = "black", fill = "white") +
+      xlab("Residuals") +
+      ylab("Count") +
+      theme_pubr()
+    
+    
+    # QQplots:
+    QQ <- ggplot(data, aes(sample = resid)) +
+      stat_qq() + stat_qq_line() +
+      xlab("Theoretical quantiles") +
+      ylab("Sample Quantiles") +
+      theme_pubr()
+    
+    
+    # Residual plot:
+    Res <- ggplot(data, aes(predicts, resid)) +
+        geom_point(alpha = 0.5)  +
+        geom_abline(slope = 0, intercept = 0, linetype = "dashed") +
+        theme_pubr()
+    
+    
+    # Scatter:
+    Val <- ggplot(data, aes(TEP, predicts)) +
+        geom_point(alpha = 0.5) +
+        geom_abline(slope = 1, intercept = 0, linetype = "dashed") +  #1:1 line
+        theme_pubr()
+    
+    
+    # Arrange plots:
+    plots <- ggarrange(QQ, Histo, Res, Val, ncol = 2, nrow = 2)
+    
+    return(plots)
+
+}
+
+
+# A function to calculate prediction accuracy a given model:
+ModelCrossVal <- function(model, data){
+  
+  predictions <- predict(model)
+  
+  mae <- MAE(predictions, data$TEP)  # Mean absolute error
+  rmse <- RMSE(predictions, data$TEP)  # Root mean square error
+  rsq <- summary(model)$r.squared  # R squared
+  
+  acc <- c(mae, rmse, rsq)
+  
+  return(acc)
+
+}
+
+
+
+# Create a function to plots cross validation results for the above model and 
+# cross validation techniques:
+CrossValPlot <- function(model, data){
+  
+  data$Predictions <- predict(model)
+
+  # Calculate Rsqaured between predicted and true values to annotate:
+  Rsq <- summary(lm(Predictions ~ TEP, data = data))$r.squared
+  Rsq <- format(round(Rsq, 2), nsmall = 2)
+  
+  # Calculate MAE between predicted and true values to annotate:
+  MAE <- MAE(data$Predictions, data$TEP)
+  MAE <- format(round(MAE, 2), nsmall = 2)
+  
+  crossvalplot <- ggplot(data, aes(TEP, Predictions)) +
+    geom_point(alpha = 1, size = 2, pch = 16) +
+    ylab("Predicted TEP") +
+    xlab("Measured TEP") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    scale_color_manual(values = c("blue", "green", "red")) +
+    #scale_color_viridis() +
+    #geom_smooth(method = 'lm', se = FALSE, color = 'blue') +
+    #facet_wrap(~Region) +
+    ylim(0, 150) +
+    xlim(0, 150) +
+    #geom_label(aes(25, 130, label=paste("R squared: ", Rsq,
+                      # "\nMean absolute error: ", MAE)), color = 'black') +
+    theme(legend.title = element_blank()) +
+    theme_bw()
+  
+  return(crossvalplot)
+}
+
+
+```
+
+
+# Correlation and Signifiance matrix for each region:
+```{r}
+
+Pacific_corrdata <- data.frame(Pacific_data %>%  
+  dplyr::select(TEP, Log_Chl, POC, DO,
+                Nitrate, Phosphate, Silicate,
+                Temperature, MLD, WS, Bloom, Salinity
+                #Density, PAR
+                ))
+
+chart.Correlation(Pacific_corrdata, histogram=TRUE, pch=19)
+# Primary variables = Log_Chl, POC, DO, nitrate, phosphate, temperature, bloom, mld, ws)
+
+Arctic_corrdata <- data.frame(Arctic_data %>%  
+  dplyr::select(TEP, Log_Chl, POC,
+                Nitrate, Phosphate, Silicate,
+                Temperature, MLD, WS, Bloom
+                # Density, PAR
+                ))
+
+chart.Correlation(Arctic_corrdata, histogram=TRUE, pch=19)
+# Primary variables = Log_Chl, POC, DO, silicate, temperature, bloom, mld, ws)
+
+
+Arctic_corrdata <- data.frame(Arctic_data %>%  
+  dplyr::select(TEP, Log_Chl, POC,
+                Nitrate, Phosphate, Silicate,
+                Temperature, MLD, WS, Bloom
+                # Density, PAR
+                ))
+
+chart.Correlation(Arctic_corrdata, histogram=TRUE, pch=19)
+# Primary variables = Log_Chl, POC, silicate, temperature, bloom, mld, ws)
+
+
+Bering_corrdata <- data.frame(Bering_data %>%  
+  dplyr::select(TEP, Log_Chl, POC,
+                Nitrate, Phosphate, Silicate,
+                Temperature, MLD, WS, Bloom
+                # Density, PAR
+                ))
+
+chart.Correlation(Bering_corrdata, histogram=TRUE, pch=19)
+# Primary variables = Log_Chl, POC, silicate, temperature, bloom, mld)
+
+
+
+# above variables are significantly correlated with TEP (note tempertaure is accompanied by bloom)
+```
+
+
+# Pacific: Stepwise regression:
+```{r}
+
+full.model <- lm(TEP ~ ., Pacific_data)  # define a model with all parameters
 
 # Create the stepwise regression
 step.model <- stepAIC(full.model, direction = "backward", 
@@ -96,27 +300,112 @@ step.model$coefficients
 plot(step.model$residuals ~ step.model$fitted.values)
 
 
-#create histogram of residuals
-ggplot(data = data, aes(x = step.model$residuals)) +
-    geom_histogram(fill = 'steelblue', color = 'black') +
-    labs(title = 'Histogram of Residuals', x = 'Residuals', y = 'Frequency')
-
-
 # Check assumptions:
-ModelVal(step.model, data)  # plots
+ModelVal(step.model, Pacific_data)  # plots
 car::vif(step.model)  # multi-collinearity
-shapiro.test(resid(step.model))
+ols_test_normality(resid(step.model))
+plot(step.model)
+
 
 
 # In order to create the final model, we need to eliminate any parameters that are excessively correlated (i.e autocorrelation):
-model <- lm(TEP ~ Log_Chl + POC + DO + Temperature + MLD + Phosphate, data = data)
-summary(model)
-ModelVal(model, data)  # plots
-car::vif(model)  # multi-collinearity
-shapiro.test(resid(model))
+model.pacific <- lm(TEP ~ Log_Chl + Nitrate + DO +
+              Temperature + MLD + Bloom, data = Pacific_data)
+summary(model.pacific)
+ModelVal(model.pacific, Pacific_data)  # plots
+car::vif(model.pacific)  # multi-collinearity
+
+# Normality:
+ols_test_normality(resid(model.pacific))
+
 
 ```
 
+
+# Compare Pacific model types with AIC and cross validation techniques:
+```{r}
+
+# Sequentially add variables to a base model and evaluate accuracies:
+
+# Define the cross validation functions:
+train.control.LOOCV <- trainControl(method = "LOOCV")
+train.control.KFOLD <- trainControl(method = "repeatedcv", 
+                                    number = 15, repeats = 10)
+  
+  
+
+# Base biomass models:
+B_model <- lm(TEP ~ Log_Chl, data = Pacific_data)  # Classic model
+B.model <- train(TEP ~ Log_Chl, data = Pacific_data,  # Train CV model
+                  method = 'lm', trControl = train.control.LOOCV)
+B_MAE <- ModelCrossVal(B.model, Pacific_data)[1]
+B_Rsq <- ModelCrossVal(B.model, Pacific_data)[3]
+
+# Nut inclusion:
+BN_model <- lm(TEP ~ Log_Chl + Nitrate, data = Pacific_data)
+BN.model <- train(TEP ~ Log_Chl + Nitrate, data = Pacific_data,
+              method = 'lm', trControl = train.control.LOOCV)
+BN_MAE <- ModelCrossVal(BN.model, Pacific_data)[1]
+BN_Rsq <- ModelCrossVal(BN.model, Pacific_data)[3]
+
+# Temperature inclusion:
+BNT_model <- lm(TEP ~ Log_Chl + Nitrate + Temperature, data = Pacific_data)
+BNT.model <- train(TEP ~ Log_Chl + Nitrate + Temperature, data = Pacific_data, 
+              method = 'lm', trControl = train.control.LOOCV)
+BNT_MAE <- ModelCrossVal(BNT.model, Pacific_data)[1]
+BNT_Rsq <- ModelCrossVal(BNT.model, Pacific_data)[3]
+
+# Bloom inclusion:
+BNTB_model <- lm(TEP ~ Log_Chl + Nitrate + Temperature + Bloom, data = Pacific_data)
+BNTB.model <- train(TEP ~ Log_Chl + Nitrate + Temperature + Bloom, data = Pacific_data, 
+              method = 'lm', trControl = train.control.LOOCV)
+BNTB_MAE <- ModelCrossVal(BNTB.model, Pacific_data)[1]
+BNTB_Rsq <- ModelCrossVal(BNTB.model, Pacific_data)[3]
+
+# MLD inclusion:
+BNTBM_model <- lm(TEP ~ Log_Chl + Nitrate + Temperature + Bloom + MLD, data = Pacific_data)
+BNTBM.model <- train(TEP ~ Log_Chl + Nitrate + Temperature + Bloom + MLD, data = Pacific_data, 
+              method = 'lm', trControl = train.control.LOOCV)
+BNTBM_MAE <- ModelCrossVal(BNTBM.model, Pacific_data)[1]
+BNTBM_Rsq <- ModelCrossVal(BNTBM.model, Pacific_data)[3]
+
+# Oxygen inclusion:
+BNTBMO_model <- lm(TEP ~ Log_Chl + Nitrate + Temperature + Bloom + MLD + DO, data = Pacific_data)
+BNTBMO.model <- train(TEP ~ Log_Chl + Nitrate + Temperature + Bloom + MLD + DO, data = Pacific_data, 
+              method = 'lm', trControl = train.control.LOOCV)
+BNTBMO_MAE <- ModelCrossVal(BNTBMO.model, Pacific_data)[1]
+BNTBMO_Rsq <- ModelCrossVal(BNTBMO.model, Pacific_data)[3]
+
+
+
+# Create a data frame of accuracy metrics:
+acc.df <- data.frame(model = c('Biomass (POC or Chlorophyll)', '+Nuts', '+Temperature',
+                               '+Bloom', '+MLD','+DO'),
+                   MAE_P = c(B_MAE, BN_MAE, BNT_MAE, BNTB_MAE, BNTBM_MAE, BNTBMO_MAE),
+                   Rsq_P = c(B_Rsq, BN_Rsq, BNT_Rsq, BNTB_Rsq, BNTBM_Rsq, BNTBMO_Rsq))
+
+Pac_Acc_fig <- ggplot(acc.df, aes(x = factor(model, 
+                                             level = c('Biomass (POC or Chlorophyll)', 
+                                                              '+Nuts', '+Temperature', 
+                                                       '+Bloom','+MLD','+DO')))) +
+  geom_line(aes(y = MAE_P, group = 1), colour = 'blue') +  #MAEs
+  geom_point(aes(y = MAE_P), colour = 'blue') +
+  scale_y_continuous(name = "Error metrics (µg XGeq/L)", # Features of the first axis
+  sec.axis = sec_axis(~./12, name="Rsq")) + # Add a second axis and specify its features
+  geom_line(aes(y = Rsq_P*12, group = 1), colour = 'red') +  #Rsqs
+  geom_point(aes(y = Rsq_P*12), colour = 'red') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+
+
+AIC(B_model, BN_model, BNT_model, BNTB_model, BNTBM_model, BNTBMO_model)
+
+
+
+```
+
+
+# Pacific: Cross validation 
 ```{r}
 
 # Define the cross validation functions:
@@ -127,31 +416,1088 @@ train.control.KFOLD <- trainControl(method = "repeatedcv",
   
 
 # Train the selected model using train control functions above:
-preffered_model_LOOCV_full <- train(TEP ~ Log_Chl + POC + DO + Fluorescence + 
-                                 Temperature + MLD + Density + 
-                                 Silicate + Phosphate + Bloom,
-                                 data = data, method = 'lm', trControl = train.control.LOOCV)
+Pacific.CV.model <- train(TEP ~ Log_Chl + DO + Temperature + MLD + 
+                            Nitrate + Bloom, data = Pacific_data, method = 'lm', 
+                                    trControl = train.control.LOOCV)
 
-preffered_model_LOOCV_partial <- train(TEP ~ Log_Chl + DO + 
-                                 Temperature + MLD + 
-                                 Phosphate + Bloom,
-                                 data = data, method = 'lm', trControl = train.control.LOOCV)
 
 
 # Apply the cross validation functions (from previous file) to calculate and visualize accuracy metrics:
-ModelCrossVal(preffered_model_LOOCV_full, data)
-CrossValPlot(preffered_model_LOOCV_full, data)
-
-ModelCrossVal(preffered_model_LOOCV_partial, data)
-CrossValPlot(preffered_model_LOOCV_partial, data)
+ModelCrossVal(Pacific.CV.model, Pacific_data)
+Pacific.CV <- CrossValPlot(Pacific.CV.model, Pacific_data)
 
 
-AIC(model, step.model)
+# Examine the coefficients:
+Pacific_data_Std <- as.data.frame(scale(Pacific_data)) # Standardize the data
+
+Pacific.coeffs <- plot_summs(lm(TEP ~ Log_Chl + DO + Temperature + MLD + 
+                            Nitrate + Bloom, data = Pacific_data_Std), inner_ci_level = .9)
+Pacific.step.coeffs <- plot_summs(lm(TEP ~ Log_Chl + POC + DO + Temperature + MLD + Salinity + 
+    Phosphate + Bloom + Seasons, data = Pacific_data_Std), inner_ci_level = .9)
+
+ggarrange(Pacific.CV, Pacific.coeffs, nrow = 2)
+
+```
+
+# Arctic: Stepwise regression:
+```{r}
+
+# View correlations:
+cor(Arctic_data)
+
+full.model.arctic <- lm(TEP ~ ., Arctic_data)  # define a model with all parameters
+
+# Create the stepwise regression
+step.model.arctic <- stepAIC(full.model.arctic, direction = "backward", 
+                      trace = FALSE)
+
+# View results:
+summary(step.model.arctic)
+step.model.arctic$anova
+step.model.arctic$coefficients
+plot(step.model.arctic$residuals ~ step.model.arctic$fitted.values)
+
+
+# Check assumptions:
+ModelVal(step.model.arctic, Arctic_data)  # plots
+car::vif(step.model.arctic)  # multi-collinearity
+ols_test_normality(resid(step.model.arctic))
+plot(step.model.arctic)
+
+
+
+# In order to create the final model, we need to eliminate any parameters that are excessively correlated (i.e autocorrelation):
+model.arctic <- lm(TEP ~ Log_Chl + MLD, data = Arctic_data)
+summary(model.arctic)
+ModelVal(model.arctic, Arctic_data)  # plots
+car::vif(model.arctic)  # multi-collinearity
+
+# Normality:
+ols_test_normality(resid(model.arctic))
+
+#create histogram of residuals
+ggplot(data = Arctic_data, aes(x = model.arctic$residuals)) +
+    geom_histogram(aes(y = ..density..), fill = 'black', color = 'white', binwidth = 1) +
+    labs(title = 'Histogram of Residuals', x = 'Residuals', y = 'Frequency') +
+    geom_density()
+
+# Arctic_data$predicted = predict(model.arctic)
+# Arctic_data$residuals = resid(model.arctic)
+
+ggplot(data = Arctic_data, aes(MLD, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm')
+
+```
+
+
+# Compare Arctic model types with AIC and cross validation techniques:
+```{r}
+
+
+# Base biomass models:
+B_model <- lm(TEP ~ Log_Chl, data = Arctic_data)
+B.model <- train(TEP ~ Log_Chl, data = Arctic_data, 
+                  method = 'lm', trControl = train.control.LOOCV)
+B_MAE <- ModelCrossVal(B.model, Arctic_data)[1]
+B_Rsq <- ModelCrossVal(B.model, Arctic_data)[3]
+
+# Nut inclusion:
+BN_model <- lm(TEP ~ Log_Chl + 
+              Nitrate + Silicate, data = Arctic_data)
+BN.model <- train(TEP ~ Log_Chl +
+              Nitrate + Silicate, data = Arctic_data,
+              method = 'lm', trControl = train.control.LOOCV)
+BN_MAE <- ModelCrossVal(BN.model, Arctic_data)[1]
+BN_Rsq <- ModelCrossVal(BN.model, Arctic_data)[3]
+
+
+# Temperature (+Bloom) inclusion:
+BNT_model <- lm(TEP ~ Log_Chl + Nitrate + Silicate + Temperature + Bloom, data = Arctic_data)
+BNT.model <- train(TEP ~ Log_Chl + Nitrate + Silicate + Temperature + Bloom, data = Arctic_data, 
+              method = 'lm', trControl = train.control.LOOCV)
+BNT_MAE <- ModelCrossVal(BNT.model, Arctic_data)[1]
+BNT_Rsq <- ModelCrossVal(BNT.model, Arctic_data)[3]
+
+
+# MLD inclusion:
+BNTBM_model <- lm(TEP ~ Log_Chl + Nitrate + Silicate + Temperature + Bloom + MLD, data = Arctic_data)
+BNTBM.model <- train(TEP ~ Log_Chl + Nitrate + Silicate + Temperature + Bloom + MLD, data = Arctic_data, 
+              method = 'lm', trControl = train.control.LOOCV)
+BNTBM_MAE <- ModelCrossVal(BNTBM.model, Arctic_data)[1]
+BNTBM_Rsq <- ModelCrossVal(BNTBM.model, Arctic_data)[3]
+
+# WS inclusion:
+BNTBMW_model <- lm(TEP ~ Log_Chl + Nitrate + Silicate + Temperature + Bloom + MLD + WS, data = Arctic_data)
+BNTBMW.model <- train(TEP ~ Log_Chl + Nitrate + Silicate + Temperature + Bloom + MLD + WS, data = Arctic_data, 
+              method = 'lm', trControl = train.control.LOOCV)
+BNTBMW_MAE <- ModelCrossVal(BNTBMW.model, Arctic_data)[1]
+BNTBMW_Rsq <- ModelCrossVal(BNTBMW.model, Arctic_data)[3]
+
+# Create a data frame of accuracy metrics:
+acc.df.arc <- data.frame(model = c('Biomass', '+Nuts', '+Temperature', 
+                               '+MLD', '+WS'),
+                   MAE_A = c(B_MAE, BN_MAE, BNT_MAE, BNTBM_MAE, BNTBMW_MAE),
+                   Rsq_A = c(B_Rsq, BN_Rsq, BNT_Rsq, BNTBM_Rsq, BNTBMW_Rsq))
+
+Arc_Acc_fig <- ggplot(acc.df.arc, aes(x = factor(model, 
+                                levels = c('Biomass', '+Nuts', '+Temperature', 
+                               '+MLD', '+WS')))) +
+  geom_line(aes(y = MAE_A, group = 1), colour = 'blue') +  #MAEs
+  geom_point(aes(y = MAE_A), colour = 'blue') +
+  scale_y_continuous(name = "Error metrics (µg XGeq/L)", # Features of the first axis
+  sec.axis = sec_axis(~./12, name="Rsq")) + # Add a second axis and specify its features
+  geom_line(aes(y = Rsq_A*12, group = 1), colour = 'red') +  #Rsqs
+  geom_point(aes(y = Rsq_A*12), colour = 'red') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+
+
+AIC(B_model, BN_model, BNT_model, BNTBM_model, BNTBMW_model) 
+
+summary(BNTBMW_model)
+
+```
+
+
+# Arctic: Cross validation
+```{r}
+
+# Train the selected model using train control functions above:
+Arctic.CV.model <- train(TEP ~ Log_Chl + Nitrate + Silicate + Temperature + Bloom + MLD,
+                                    data = Arctic_data, method = 'lm', 
+                                    trControl = train.control.LOOCV)
+
+
+
+# Apply the cross validation functions (from previous file) to calculate and visualize accuracy metrics:
+ModelCrossVal(Arctic.CV.model, Arctic_data)
+CrossValPlot(Arctic.CV.model, Arctic_data)
+
+
+```
+# Compare Arctic model types with AIC and cross validation techniques:
+```{r}
+
+
+# Base biomass models:
+B_model <- lm(TEP ~ Log_Chl, data = Bering_data)
+B.model <- train(TEP ~ Log_Chl, data = Bering_data, 
+                  method = 'lm', trControl = train.control.LOOCV)
+B_MAE <- ModelCrossVal(B.model, Bering_data)[1]
+B_Rsq <- ModelCrossVal(B.model, Bering_data)[3]
+
+# Nut inclusion:
+BN_model <- lm(TEP ~ Log_Chl + Silicate, data = Bering_data)
+BN.model <- train(TEP ~ Log_Chl + Silicate, data = Bering_data,
+              method = 'lm', trControl = train.control.LOOCV)
+BN_MAE <- ModelCrossVal(BN.model, Bering_data)[1]
+BN_Rsq <- ModelCrossVal(BN.model, Bering_data)[3]
+
+
+# Create a data frame of accuracy metrics:
+acc.df.bering <- data.frame(model = c('Biomass', '+Nuts'),
+                   MAE_Ber = c(B_MAE, BN_MAE),
+                   Rsq_Ber = c(B_Rsq, BN_Rsq))
+
+Ber_Acc_fig <- ggplot(acc.df.bering, aes(x = factor(model, 
+                                levels = c('Biomass', '+Nuts')))) +
+  geom_line(aes(y = MAE_Ber, group = 1), colour = 'blue') +  #MAEs
+  geom_point(aes(y = MAE_Ber), colour = 'blue') +
+  scale_y_continuous(name = "Error metrics (µg XGeq/L)", # Features of the first axis
+  sec.axis = sec_axis(~./12, name="Rsq")) + # Add a second axis and specify its features
+  geom_line(aes(y = Rsq_Ber*12, group = 1), colour = 'red') +  #Rsqs
+  geom_point(aes(y = Rsq_Ber*12), colour = 'red') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+
+
+AIC(B_model, BN_model) 
 
 
 ```
 
 
+# Bering: Stepwise regression:
+```{r}
+
+full.model.bering <- lm(TEP ~ ., Bering_data)  # define a model with all parameters
+
+# Create the stepwise regression
+step.model.bering <- stepAIC(full.model.bering, direction = "backward", 
+                      trace = FALSE)
+
+# View results:
+summary(step.model.bering)
+step.model.bering$anova
+step.model.bering$coefficients
+plot(step.model.bering$residuals ~ step.model.bering$fitted.values)
+
+
+# Check assumptions:
+ModelVal(step.model.bering, Bering_data)  # plots
+car::vif(step.model.bering)  # multi-collinearity
+ols_test_normality(resid(step.model.bering))
+plot(step.model.bering)
+
+
+
+# In order to create the final model, we need to eliminate any parameters that are excessively correlated (i.e autocorrelation):
+model.bering <- lm(TEP ~ Log_Chl + Silicate, data = Bering_data)
+summary(model.bering)
+ModelVal(model.bering, Bering_data)  # plots
+car::vif(model.bering)  # multi-collinearity
+
+# Normality:
+ols_test_normality(resid(model.bering))
+
+#create histogram of residuals
+ggplot(data = Bering_data, aes(x = model.bering$residuals)) +
+    geom_histogram(aes(y = ..density..), fill = 'black', color = 'white', binwidth = 1) +
+    labs(title = 'Histogram of Residuals', x = 'Residuals', y = 'Frequency') +
+    geom_density()
+
+ggplot(data = Bering_data, aes(sample = model.bering$residuals)) +
+    stat_qq() +
+    stat_qq_line()
+
+# Outliers:
+plot(model.bering)
+
+
+
+```
+
+
+# Bering: Cross validation
+```{r}
+
+# Train the selected model using train control functions above:
+Bering.CV.model <- train(TEP ~ Log_Chl + Silicate, 
+                                    data = Bering_data, method = 'lm', 
+                                    trControl = train.control.LOOCV)
+
+
+# Apply the cross validation functions (from previous file) to calculate and visualize accuracy metrics:
+ModelCrossVal(Bering.CV.model, Bering_data)
+CrossValPlot(Bering.CV.model, Bering_data)
+
+```
+
+
+# All data: Stepwise regression:
+```{r}
+
+allclean_dataset <- all_data %>%  # Index out variables of interest
+    dplyr::select(TEP, Log_Chl, POC, 
+                  Temperature, 
+                  MLD, 
+                  Salinity,
+                  Nitrate, #Silicate,
+                  Bloom, Region, Seasons)
+  
+allclean_dataset <- na.omit(allclean_dataset)
+
+full.model.all <- lm(TEP ~ ., allclean_dataset)  # define a model with all parameters
+
+
+# Create the stepwise regression
+step.model.all <- stepAIC(full.model.all, direction = "backward", 
+                      trace = FALSE)
+
+# View results:
+summary(step.model.all)
+step.model.all$anova
+step.model.all$coefficients
+plot(step.model.all$residuals ~ step.model.all$fitted.values)
+
+# Check assumptions:
+ModelVal(step.model.all, allclean_dataset)  # plots
+car::vif(step.model.all)  # multi-collinearity
+ols_test_normality(resid(step.model.all))
+plot(step.model.all)
+
+
+# Compare some models:
+model.alt <- lm(TEP ~ Log_Chl + POC + Temperature + Region, allclean_dataset)
+model.alt2 <- lm(TEP ~ Log_Chl + POC + Temperature, allclean_dataset)
+model.alt3 <- lmer(TEP ~ Log_Chl + POC + Temperature + Region + (1|Bloom), allclean_dataset) 
+model.alt4 <- lm(TEP ~ Log_Chl + Temperature + Region, allclean_dataset)
+model.alt5 <- lm(TEP ~ Log_Chl + POC + Region, allclean_dataset)
+model.alt6 <- lm(TEP ~ Log_Chl + POC +  MLD + Region, allclean_dataset)
+model.alt7 <- lm(TEP ~ Log_Chl + POC + Temperature + Region + Bloom, allclean_dataset)
+
+AIC(model.alt2, model.alt, model.alt3, model.alt4, model.alt5, model.alt6, model.alt7)
+
+summary(model.alt)
+
+
+```
+
+
+```{r}
+
+
+
+# In order to create the final model, we need to eliminate any parameters that are excessively correlated (i.e autocorrelation):
+
+# Refined model from stepwise regression:
+model.all <- lm(TEP ~ Log_Chl + (POC) + Temperature + 
+                  Region, data = allclean_dataset)
+#model.all <- lmer(TEP ~ Log_Chl + log(POC) + Temperature + (1|Bloom), data = allclean_dataset)
+#model.all <- lmer(TEP ~ Log_Chl + POC + MLD + Region + (1|Bloom), data = allclean_dataset)
+
+ols_test_normality(resid(model.all))  # Normality
+summary(model.all)
+ModelVal(model.all, allclean_dataset)  # plots
+car::vif(model.all)  # multi-collinearity
+
+
+
+#create histogram of residuals
+ggplot(data = allclean_dataset, aes(x = model.all$residuals)) +
+    geom_histogram(aes(y = ..density..), fill = 'black', color = 'white', binwidth = 1) +
+    labs(title = 'Histogram of Residuals', x = 'Residuals', y = 'Frequency') +
+    geom_density()
+
+ggplot(data = allclean_dataset, aes(sample = model.all$residuals)) +
+    stat_qq() +
+    stat_qq_line()
+
+# Outliers:
+plot(model.all)
+
+
+# Train the selected model using train control functions above:
+All.CV.model <- train(TEP ~ Log_Chl + (POC) +
+                        Temperature + Region,
+                        data = allclean_dataset, method = 'lm',
+                        trControl = train.control.LOOCV)
+
+# Apply the cross validation functions (from previous file) to calculate and visualize accuracy metrics:
+ModelCrossVal(All.CV.model, allclean_dataset)
+CrossValPlot(All.CV.model, allclean_dataset)
+
+
+# Add residuals and predictions to the dataframe:
+allclean_dataset$predicted = predict(model.all, allclean_dataset)
+allclean_dataset$residuals = resid(model.all)
+allclean_dataset$Log_POC = log(allclean_dataset$POC)
+
+
+
+# Create a new dataframe but drop the extreme residuals making the dtaset non-normal:
+
+normalized_alldata <- allclean_dataset[allclean_dataset$residuals < 50, ]
+
+normalized_alldata <- normalized_alldata %>%  # Index out variables of interest
+    dplyr::select(TEP, Log_Chl, Temperature, Log_POC,
+                  Region, Seasons, MLD,
+                  #Nitrate, Silicate, Phosphate,
+                  Bloom)
+
+normalized_alldata <- na.omit(normalized_alldata)
+
+
+
+# Go through the model selection procedure again:
+refined.model.all <- lm(TEP ~ ., normalized_alldata)
+
+# Create the stepwise regression
+step.refined.model.all <- stepAIC(refined.model.all, direction = "backward",
+                      trace = FALSE)
+
+ols_test_normality(resid(step.refined.model.all))  # Normality
+summary(step.refined.model.all)
+ModelVal(step.refined.model.all, normalized_alldata)  # plots
+car::vif(step.refined.model.all)  # multi-collinearity
+
+
+
+#refined.model <- lmer(TEP ~ Log_Chl + Temperature + POC + (1|Bloom) + Seasons, data = normalized_alldata)
+refined.model <- lm(TEP ~ Log_Chl + Temperature + Log_POC + Region, data = normalized_alldata)
+ols_test_normality(resid(refined.model))  # Normality
+summary(refined.model)
+ModelVal(refined.model, normalized_alldata)  # plots
+car::vif(refined.model)  # multi-collinearity
+
+
+# Train the selected model using train control functions above:
+Refined.CV.model <- train(TEP ~ Log_Chl + Log_POC +
+                        Temperature + Region,
+                        data = allclean_dataset, method = 'lm',
+                        trControl = train.control.LOOCV)
+
+# Apply the cross validation functions (from previous file) to calculate and visualize accuracy metrics:
+ModelCrossVal(All.CV.model, allclean_dataset)
+CrossValPlot(All.CV.model, allclean_dataset)
+
+```
+
+```{r}
+
+Arc_Acc_fig
+Pac_Acc_fig
+Ber_Acc_fig
+
+```
+
+
+
+
+
+# All data: Cross validation
+```{r}
+
+
+
+# Combine all predictions into one data set:
+prediction_df <- data.frame(Pacific_data$TEP)  # data frame for true values
+prediction_df$predictions <- predict(Pacific.CV.model)  # cross validations
+prediction_df$Region <- factor(x = "Pacific")  # cross validations
+colnames(prediction_df) <- c("Measured", "Predicted", "Region")
+
+
+prediction_df_arctic <- data.frame(Arctic_data$TEP)  # data frame for true values
+prediction_df_arctic$predictions_arctic <- predict(Arctic.CV.model)  # cross validations
+prediction_df_arctic$Region_arctic <- factor(x = "Arctic")  # cross validations
+colnames(prediction_df_arctic) <- c("Measured", "Predicted", "Region")
+
+prediction_df_bering <- data.frame(Bering_data$TEP)  # data frame for true values
+prediction_df_bering$predictions_bering <- predict(Bering.CV.model)  # cross validations
+prediction_df_bering$Region_bering <- factor(x = "Bering")  # cross validations
+colnames(prediction_df_bering) <- c("Measured", "Predicted", "Region")
+
+
+# Combine all data frames:
+prediction_df <- rbind(prediction_df, prediction_df_arctic, prediction_df_bering)
+
+
+CV_facet <- ggplot(prediction_df, aes(Measured, Predicted, colour = Region)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  facet_wrap(~Region) +
+  theme(legend.position = 'none') +
+  theme_bw()
+
+```
+
+# View all coefficients:
+```{r}
+
+model_list <- list(model.pacific.std, model.bering.std, model.arctic.std)
+model_names <- c("Pacific", "Bering", "Arctic")
+
+
+CoefficientPlot <- function(models, alpha = 0.05, modelnames = model_names){
+  # models must be a list()
+
+  Multiplier <- qnorm(1 - alpha / 2)
+  CoefficientTables <- lapply(models, function(x){summary(x)$coef})
+  TableRows <- unlist(lapply(CoefficientTables, nrow))
+
+  if(modelnames[1] == ""){
+    ModelNameLabels <- rep(paste("Model", 1:length(TableRows)), TableRows)
+    } else {
+    ModelNameLabels <- rep(modelnames, TableRows)
+    }
+
+  MatrixofModels <- cbind(do.call(rbind, CoefficientTables), ModelNameLabels)
+  MatrixofModels <- data.frame(cbind(rownames(MatrixofModels), MatrixofModels))
+  colnames(MatrixofModels) <- c("IV", "Estimate", "StandardError", "TValue", "PValue", "ModelName")
+  MatrixofModels$ModelName = factor(MatrixofModels$ModelName, levels = c("Pacific", "Arctic", "Bering"))
+  #MatrixofModels$IV <- factor(MatrixofModels$IV, levels = MatrixofModels$IV)
+  MatrixofModels[, -c(1, 6)] <- apply(MatrixofModels[, -c(1, 6)], 2, function(x){as.numeric(as.character(x))})
+
+  OutputPlot <- qplot(IV, Estimate, ymin = Estimate - Multiplier * StandardError,
+   ymax = Estimate + Multiplier * StandardError, data = MatrixofModels, geom = "pointrange",
+   ylab = NULL, xlab = NULL)
+  OutputPlot <- OutputPlot + geom_hline(yintercept = 0, lwd = I(7/12), 
+                                        colour = I(hsv(0/12, 7/12, 7/12)), alpha = I(5/12))
+  OutputPlot <- OutputPlot + facet_grid(~ ModelName) + coord_flip() + theme_bw() +
+    scale_x_discrete(limits = c("Bloom", "Silicate", "Nitrate", 
+                                "MLD", "Temperature",
+                                "Log_Chl", "DO", "POC"))
+  return(OutputPlot)
+  }
+
+
+CoefficientPlot(model_list)
+
+  
+pdf(file = "Cross_validations.pdf",   # The directory you want to save the file in
+    width = 12, # The width of the plot in inches
+    height = 8) # The height of the plot in inches
+
+ggarrange(OutputPlot, CV_facet, nrow=2, ncol=1, common.legend = TRUE)
+
+dev.off()
+
+
+# # Respecifiy models and standardize:
+# model.pacific.std <- lm(TEP ~ Log_Chl + Nitrate + DO +
+#               Temperature + MLD + Bloom, data = Pacific_data_Std)
+# model.bering.std <- lm(TEP ~ Log_Chl + Nitrate, data = Bering_data_Std)
+# model.arctic.std <- lm(TEP ~ POC + Temperature + Bloom + Silicate + Nitrate, data = Arctic_data_Std)
+# # model.total.std <- lm(TEP ~ Log_Chl + POC + Nitrate + MLD + Region, 
+# #                       data = as.data.frame(scale(allclean_dataset)))
+# 
+# 
+# threeM <- rbind(tidy(model.pacific.std) %>% mutate(model = "Pacific model"), 
+#                 tidy(model.bering.std) %>% mutate(model = "BC model"), 
+#                 tidy(model.arctic.std) %>% mutate(model = "Arctic model"))
+# 
+# 
+# coeff_plot <- dwplot(threeM, vars_order = c("Log_Chl", "DO",
+#                                             "Silicate", "Nitrate",
+#                                             "Temperature", "Bloom", "MLD")) +
+#     theme(legend.title=element_blank(), 
+#           #panel.background = element_rect(fill = "white"), 
+#           panel.grid.major.x = element_line(colour="grey")) +
+#   geom_vline(xintercept = 0)
+
+
+# 
+# 
+# 
+# Multiplier <- qnorm(1 - 0.05 / 2)
+# CoefficientTables <- lapply(model_list, function(x){summary(x)$coef})
+# TableRows <- unlist(lapply(CoefficientTables, nrow))
+# ModelNameLabels <- rep(paste("Model", 1:length(TableRows)), TableRows)
+# ModelNameLabels <- rep(model_names, TableRows)
+# 
+# MatrixofModels <- cbind(do.call(rbind, CoefficientTables), ModelNameLabels)
+# MatrixofModels <- data.frame(cbind(rownames(MatrixofModels), MatrixofModels))
+# colnames(MatrixofModels) <- c("IV", "Estimate", "StandardError", "TValue", "PValue", "ModelName")
+# MatrixofModels$ModelName = factor(MatrixofModels$ModelName, levels = c("Pacific", "Arctic", "Bering"))
+# #MatrixofModels$IV <- factor(MatrixofModels$IV, levels = MatrixofModels$IV)
+# MatrixofModels[, -c(1, 6)] <- apply(MatrixofModels[, -c(1, 6)], 2, function(x){as.numeric(as.character(x))})
+# 
+# OutputPlot <- qplot(IV, Estimate, ymin = Estimate - Multiplier * StandardError,
+#    ymax = Estimate + Multiplier * StandardError, data = MatrixofModels, geom = "pointrange",
+#    ylab = NULL, xlab = NULL)
+#   OutputPlot <- OutputPlot + geom_hline(yintercept = 0, lwd = I(7/12), 
+#                                         colour = I(hsv(0/12, 7/12, 7/12)), alpha = I(5/12))
+#   OutputPlot <- OutputPlot + facet_grid(~ ModelName) + 
+#     coord_flip() + theme_bw() + xlab("") + 
+#     scale_x_discrete(limits = c("Bloom", "Silicate", "Nitrate", 
+#                                 "MLD", "Temperature",
+#                                 "Log_Chl", "DO", "POC"))
+
+```
+
+
+# Compare model coefficients:
+```{r}
+
+Arctic_prediction_df <- data.frame(Arctic_data$TEP)  # data frame for true values
+Arctic_prediction_df$Arctic_predictions <- predict(Arctic.CV.model)  # cross validations
+
+Pacific_prediction_df <- data.frame(Pacific_data$TEP)  # data frame for true values
+Pacific_prediction_df$Pacific_predictions <- predict(Pacific.CV.model)  # cross validations
+
+Bering_prediction_df <- data.frame(Bering_data$TEP)  # data frame for true values
+Bering_prediction_df$Bering_predictions <- predict(Bering.CV.model)  # cross validations
+
+
+# Merge data frames:
+prediction_df <- merge(data.frame(Pacific_prediction_df), 
+                       data.frame(Arctic_prediction_df), 
+                       by = 0, all = TRUE)[-1]
+
+prediction_df <- merge(data.frame(prediction_df), 
+                       data.frame(Bering_prediction_df), 
+                       by = 0, all = TRUE)[-1]
+
+
+CV_plot <-  ggplot(prediction_df) +
+  
+  geom_point(aes(x = Pacific_data.TEP, y = Pacific_predictions),
+             colour = 'blue', alpha = 0.7) +  # Pacific
+  
+  geom_point(aes(x = Arctic_data.TEP, y = Arctic_predictions),  # Arctic
+             colour = 'red', alpha = 0.7) +
+  
+  geom_point(aes(x = Bering_data.TEP, y = Bering_predictions),  # Bering
+             colour = 'seagreen', alpha = 0.7) +
+  
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  # #geom_label(label = "Pacific model: TEP ~ Chl (log) + DO + Temperature + MLD + Phosphate + Bloom term", 
+  #            x = 65, y = 160, label.padding = unit(0.35, "lines"),
+  #            label.size = 0.35, color = "blue") +
+  # geom_label(label = "Arctic model: TEP ~ Chl (log) + Temperature + Nitrate + Bloom", 
+  #            x = 33, y = 145, label.padding = unit(0.35, "lines"),
+  #            label.size = 0.35, color = "red") +
+  # geom_label(label = "Bering model: TEP ~ Chl (log) + Silica", 
+  #            x = 30, y = 130, label.padding = unit(0.35, "lines"),
+  #            label.size = 0.35, color = "darkgreen") +
+  ylim(0, 160) +
+  xlim(0, 140) +
+  labs(x = 'Measured TEP', y = 'Predicted TEP') +
+  theme_pubr()
+
+
+
+# Plot the predictions:
+pdf(file = "Cross_validations.pdf",   # The directory you want to save the file in
+    width = 8, # The width of the plot in inches
+    height = 12) # The height of the plot in inches
+
+ggarrange(coeff_plot, CV_plot, nrow = 2)
+
+
+dev.off()
+
+```
+
+ 
+# Temperature analysis:
+```{r}
+
+all_data$TEP_Chl <- all_data$TEP/all_data$Chl
+
+
+facet_names <- c(`HBE` = "HBE (Chla >5 µg/L)", 
+                 `LBE` = "LBE (Chl a <5 µg/L)")
+
+all_data %>% 
+  drop_na(HBE)  %>% 
+  ggplot(aes(Temperature, TEP, na.rm = TRUE)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', show.legend = FALSE, se = FALSE, lty = 'dashed') +
+  facet_wrap(~HBE, labeller = as_labeller(facet_names)) +
+  xlab("Temperature (˚C)") +
+  ylab("TEP (µg XG eq/L)") +
+  theme_bw()
+
+all_data %>% 
+  drop_na(HBE)  %>% 
+  ggplot(aes(Temperature, TEP, colour = HBE, size = Chl)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', show.legend = FALSE, se = FALSE, lty = 'dashed') +
+  #facet_wrap(~HBE, labeller = as_labeller(facet_names)) +
+  xlab("Temperature (˚C)") +
+  ylab("TEP (µg XG eq/L)") +
+  theme_bw()
+
+# templmer <- lmer(TEP ~ Temperature + (1|Bloom), data = all_data)
+# templm <- lm(TEP ~ Temperature + Bloom, data = all_data)
+# r.squaredGLMM(templmer)
+#   
+# AIC(templmer, templm)
+  
+
+
+  
+  
+  
+  
+N_ratio <- ggplot(all_data, aes(Nitrate, TEP/Chl)) + 
+  geom_point() + 
+  geom_smooth(method = 'lm', se = FALSE) +
+  ylim(0, 325) +
+  facet_wrap(~Area)
+
+T_ratio <- ggplot(all_data, aes(Temperature, TEP/Chl)) + 
+  geom_point() + 
+  geom_smooth(method = 'lm', se = FALSE) +
+  ylim(0, 325) +
+  facet_wrap(~Area)
+
+M_ratio <- ggplot(all_data, aes(MLD, TEP/Chl)) + 
+  geom_point() + 
+  geom_smooth(method = 'lm', se = FALSE) +
+  ylim(0, 325) +
+  facet_wrap(~Area)
+
+ggarrange(T_ratio, N_ratio, ncol = 1)
+
+
+
+
+```
+
+# Regressor plots:
+```{r}
+
+# Biomass:
+Chl <- ggplot(all_data, aes(Chl, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+POC <- ggplot(all_data, aes(POC, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+Flo <- ggplot(all_data, aes(Fluorescence, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+DO <- ggplot(all_data, aes(DO, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+# ER
+
+Temp <- ggplot(all_data, aes(Temperature, TEP, colour = as.factor(Bloom))) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+Nit <- ggplot(all_data, aes(Nitrate, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+Si <- ggplot(all_data, aes(Silicate, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+Pho <- ggplot(all_data, aes(Phosphate, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+
+# Strat
+MLD <- ggplot(all_data, aes(MLD, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+Sal <- ggplot(all_data, aes(Salinity, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+# Sink
+
+PAR <- ggplot(all_data, aes(PAR, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+WS<- ggplot(all_data, aes(WS, TEP)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  facet_wrap(~Area)
+
+
+# Plot the predictions:
+pdf(file = "Regressors.pdf",   # The directory you want to save the file in
+    width = 8, # The width of the plot in inches
+    height = 20) # The height of the plot in inches
+
+
+ggarrange(Chl, POC, Flo, DO,
+          Temp, Nit, Si, Pho,
+          MLD, Sal,
+          PAR, WS, ncol = 1)
+
+dev.off()
+```
+
+
+
+# Some plots
+```{r}
+
+
+
+# Temperature:
+ggplot(all_data, aes(Temperature, TEP, colour = POC, size = POC)) +
+  geom_point() +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm')
+
+ggplot(all_data, aes(Temperature, TEP_C)) +
+  geom_point() +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm')
+
+summary(lm(TEP ~ Temperature + Bloom + Area, data = all_data))
+
+
+# MLD:
+ggplot(all_data, aes(MLD, TEP)) +
+  geom_point() +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm')
+
+summary(lm(TEP ~ MLD, data = all_data))
+
+
+# Density:
+ggplot(all_data, aes(Density, TEP)) +
+  geom_point() +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm')
+
+summary(lm(TEP ~ Density, data = all_data))
+
+
+# Chlorophyll:
+ggplot(all_data, aes(Chl, TEP, colour = as.factor(Area))) +
+  geom_point(pch = 21) +
+  geom_smooth(method = 'lm') +
+  facet_wrap(~Area) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+        labels = trans_format("log10", math_format(10^.x)))
+
+summary(lm(TEP ~ Chl, data = all_data))
+
+# POC:
+ggplot(all_data, aes(POC, TEP, colour = as.factor(Area))) +
+  geom_point(pch = 21) +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm') 
+
+summary(lm(TEP ~ POC, data = all_data))
+
+
+# Nitrate:
+ggplot(all_data, aes(Nitrate, TEP, colour = as.factor(Area))) +
+  geom_point() +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm') 
+
+summary(lm(TEP ~ Nitrate, data = all_data))
+
+
+# Phosphate:
+ggplot(all_data, aes(Phosphate, TEP, colour = as.factor(Area))) +
+  geom_point() +
+  theme_bw() +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm') 
+
+summary(lm(TEP ~ Phosphate, data = all_data))
+
+
+# Silica:
+ggplot(all_data, aes(Silicate, TEP, colour = as.factor(Area))) +
+  geom_point(pch = 21) +
+  facet_wrap(~Area) +
+  geom_smooth(method = 'lm') 
+
+summary(lm(TEP ~ Silicate, data = all_data))
+
+
+
+ggplot(all_data, aes(DO, TEP, colour = as.factor(Area))) +
+  geom_point(pch = 21)
+
+
+ggplot(all_data, aes(Salinity, Temperature, colour = as.factor(Area))) +
+  geom_point(pch = 21)
+
+
+ggplot(all_data, aes(Salinity, MLD, colour = TEP, size = TEP)) +
+  geom_point(pch = 16) +
+  scale_color_viridis()
+
+ggplot(all_data, aes(Salinity, TEP, colour = Area)) +
+  geom_point(pch = 16)
+
+
+ggplot(all_data, aes(WS, TEP)) +
+  geom_point(pch = 16) +
+  geom_smooth(method = 'lm')
+
+summary(lm(TEP ~ WS, data = all_data))
+
+
+```
+
+
+# Redfield Ratio plots
+```{r}
+
+
+ggplot(all_data, aes(x=PC_PN)) + 
+ geom_histogram(aes(y=..density..), colour="black", fill="white", binwidth = 0.2) +
+ geom_density(alpha=.2, fill="#FF6666") +
+ geom_vline(aes(xintercept = mean(na.omit(PC_PN))), color="blue", linetype="dashed", size=1)
+
+
+ggplot(all_data, aes(x=TEP_C, colour = Season , fill = Season)) + 
+ #geom_histogram(aes(y=..density..), binwidth = 1) +
+  facet_wrap(~Area) +
+  geom_density(alpha=.2, aes(colour = Season))
+
+
+ggplot(all_data, aes(x=TEP_C, colour = Seasons, fill = Season)) + 
+ #geom_histogram(aes(y=..density..), binwidth = 0.2) +
+ geom_density(alpha=.2, aes(colour = Seasons)) +
+ xlim(0, 50)
+
+
+
+ggplot(all_data, aes(x=PC_PN)) + 
+ geom_histogram(aes(y=..density.., fill = cut(TEP_C, 20)), binwidth = 0.1) +
+ geom_density(alpha=.2, fill="#FF6666") +
+ geom_vline(aes(xintercept = median(na.omit(PC_PN))), color="blue", linetype="dashed", size=1)
+
+
+
+ggplot(all_data, aes(PC_PN, TEP_C)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', se = TRUE) +
+  xlab("POC:PON") +
+  ylab("%TEP-C") +
+  ylim(0, 50)
+
+
+ggplot(all_data, aes(PC_PN, POC)) + 
+  geom_point() +
+  xlab("POC:PON") +
+  #geom_smooth(method = 'loess', se = TRUE) +
+  geom_vline(aes(xintercept = median(na.omit(PC_PN))), color="blue", linetype="dashed", size=1)
+
+summary(lm(TEP_C ~ PC_PN, data = all_data))
+
+
+ggplot(all_data, aes(Temperature, TEP_C, colour = Area)) + 
+  geom_point() +
+  xlab("Temperature ˚C") +
+  geom_smooth(method = 'lm', se = TRUE) +
+  facet_wrap(~Area)
+
+summary(lm(TEP_C ~ Temperature + Area, data = all_data))
+
+```
+
+
+Quick visuals: biomass:
+```{r}
+
+Chl <- ggplot(data, aes(Chl, TEP)) + 
+  geom_point(pch = 21) +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  #scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+          #labels = trans_format("log10", math_format(10^.x))) +
+  #annotation_logticks(sides = "b") +
+  theme_pubr()
+
+POC <- ggplot(data, aes(POC, TEP)) + 
+  geom_point(pch = 21) +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+
+DO <- ggplot(data, aes(DO, TEP, colour = Area)) + 
+  geom_point(pch = 21) +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+
+Fluor <- ggplot(data, aes(Fluorescence, TEP, colour = Area)) + 
+  geom_point(pch = 21) +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+
+ggarrange(Chl, POC, DO, Fluor, common.legend = TRUE)
+
+
+
+Temp <- ggplot(data, aes(Temperature, TEP, colour = Area)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+MLD <- ggplot(data, aes(MLD, TEP, colour = Area)) + 
+  geom_point(pch = 21) +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+
+Nitrate <- ggplot(data, aes(Nitrate, TEP, colour = Area)) + 
+  geom_point(pch = 21) +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+
+Phosphate <- ggplot(data, aes(Phosphate, TEP, colour = Area)) + 
+  geom_point(pch = 21) +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+
+Nitrate <- ggplot(data, aes(Temperature, TEP/Chl, colour = Area)) + 
+  geom_point() +
+  #geom_smooth(method = 'lm', se = FALSE) +
+  theme_pubr()
+
+
+
+
+biomass <- ggarrange(Chl, POC, DO, Fluor, common.legend = TRUE)
+environment <- ggarrange(Temp, MLD, Nitrate, Phosphate, common.legend = TRUE)
+
+
+ggarrange(biomass, environment)
+
+```
+
+# Visualize the correlations between TEP/%TEP-C and independant variables:
+```{r}
+
+# Establish appropriate data frames with relevant variables:
+corr_data <- data.frame(all_data %>%  
+  dplyr::select(Chl, POC, DO, Fluorescence,
+                Nitrate, Phosphate, Silicate,
+                Temperature, MLD, Density, PAR
+                ))
+
+TEP_df <- data.frame(all_data %>%  
+  dplyr::select(TEP))
+
+TEPC_df <- all_data %>%  
+  dplyr::select(TEP_C)
+
+
+
+correlations <- list()  # provide an empty list
+significance <- list()  # provide an empty list
+
+# Create a function to get the R2 for each dependent:independent variable combination:
+
+corr_fun <- function(dependantvar, independantvars){
+  
+  # Loop through each independent variable combination:
+  for (i in 1:length(independantvars)){
+    
+    rsq <- summary((lm(dependantvar[[1]] ~ independantvars[[i]])))$r.squared
+    p_value <- summary((lm(dependantvar[[1]] ~ independantvars[[i]])))$coefficients[2,4]
+    
+    correlations[[i]] <- rsq
+    significance[[i]] <- p_value
+    
+  }
+  
+  
+  stats <- cbind(correlations, significance)  # merge into a list
+   
+  return(stats)
+  
+  
+}
+
+correlation_data_TEP <- as.data.frame(corr_fun(TEP_df, corr_data))  # TEP stats
+correlation_data_TEPC <- as.data.frame(corr_fun(TEPC_df, corr_data))  # TEPC stats
+
+```
+
+
+# ----- 
+# BREAK
+# -----
 
 # Checking model assumptions: Equal variance and normal distribution of model residuals:
 ```{r}

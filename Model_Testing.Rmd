@@ -39,6 +39,7 @@ suppressMessages(library(car))
 suppressMessages(library(GGally))
 suppressMessages(library(reshape2))
 suppressMessages(library(PKNCA))
+suppressMessages(library(lmerTest))
 
 ```
 
@@ -61,7 +62,7 @@ Read_fn <- function(file) {
     mutate(Bloom = if_else(Chl > 2.5, 1, 0))
   
   data <- data %>%  # Index out variables of interest
-    select(TEP, Temperature, Season, Log_Chl, POC, Summer, 
+    dplyr::select(TEP, Temperature, Season, Log_Chl, POC, Summer, 
            Winter, Bloom, Arctic, Area, Depth, Chl)
   
   data <- na.omit(data)
@@ -266,7 +267,7 @@ ModelVal <- function(model, data){
     
     
     # Scatter:
-    Val <- ggplot(global_data, aes(TEP, predicts)) +
+    Val <- ggplot(data, aes(TEP, predicts)) +
         geom_point(alpha = 0.5) +
         geom_abline(slope = 1, intercept = 0, linetype = "dashed") +  #1:1 line
         theme_pubr()
@@ -349,9 +350,9 @@ CrossValPlot <- function(model, data){
     geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
     #scale_color_manual(values = c("royalblue", "black")) +
     #scale_color_viridis() +
-    #geom_smooth(method = 'lm', se = FALSE, color = 'red') +
+    geom_smooth(method = 'lm', se = FALSE, color = 'blue') +
     #facet_wrap(~Area) +
-    ylim(0, 150) +
+    #ylim(0, 150) +
     #geom_label(aes(25, 130, label=paste("R squared: ", Rsq,
                       # "\nMean absolute error: ", MAE)), color = 'black') +
     theme(legend.title = element_blank()) +
@@ -442,8 +443,66 @@ AIC(Test_lm_model, Test_lmer_model, Test_lmer_model_2, Test_lm_model_1, Test_lm_
 AIC(Test_lm_model, Test_lmer_model)
 
 summary(Test_lmer_model)
+anova(Test_lmer_model)
+r.squaredGLMM(Test_lmer_model)
+r.squaredGLMM(Test_lmer_model_2)
 
 
+```
+
+Need to create a cross validation function for mixed effects models as the above LOOCV and KFOLD functions do not take lmer objects:
+```{r}
+
+# Containers for the predictions and accuracy measurements:
+sample_train <- NULL
+lmer_predict <- NULL
+lmer_RMSE <- NULL
+lmer_MAE <- NULL
+
+# Loop through model prediction and cross validation 25x. The model is trained on 95% of the data, and validated on the other 5%, 25x.
+
+for (i in 1:60) {
+  
+  #Creating a re-sampled data set from the total data:
+  training.samples <- createDataPartition(final_data$TEP, p = 0.95, list = FALSE)
+  train.data1  <- final_data[training.samples, ]  # Training set
+  test.data1 <- final_data[-training.samples, ]  # Testing set
+  
+  
+  # Running the models and creating predictions, accuracy metrics on the partitioned training data:
+  Lmer_model <- lmer(TEP ~ Log_Chl + Temperature + Bloom + (1 + Log_Chl|Arctic), data = train.data1) 
+  #Lmer_model <- lmer(TEP ~ Log_Chl + Temperature + Bloom + (1|Arctic), data = train.data1)
+  #Lmer_model <- lm(TEP ~ Log_Chl + Temperature + Bloom + Arctic, data = train.data1)
+  
+  # Model 'true' training points, applies to each model:
+  sample_train <- c(sample_train, test.data1$TEP)
+  
+  
+  # Model predictions and error calculations:
+  lmer_predict <- c(lmer_predict, predict(Lmer_model, test.data1, type = "response", allow.new.levels = TRUE))  # Predictions
+  lmer_RMSE <- c(lmer_RMSE, RMSE(lmer_predict, sample_train))  # RMSE
+  lmer_MAE <- c(lmer_MAE, MAE(lmer_predict, sample_train))  # MAE
+ 
+  
+}
+
+predictions <- cbind(lmer_predict, sample_train)
+predictions <- as.data.frame(predictions)  # as a data frame
+
+
+ggplot(predictions, aes(x = sample_train, y = lmer_predict)) +
+    geom_point(alpha = 0.5) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    geom_smooth(method = 'lm', se = FALSE) +
+    ggtitle("") +
+    ylim(0, 200) +
+    xlim(0, 200) +
+    ylab("") +
+    xlab("") +
+    theme_pubr() +
+    theme(plot.title=element_text(size=8,face="bold"))
+
+summary(lm(lmer_predict ~ sample_train, data = predictions))$r.squared
 
 ```
 
