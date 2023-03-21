@@ -1,0 +1,79 @@
+---
+title: "Deep Learning Algorithms"
+output: html_document
+---
+
+
+# Packages:
+```{r}
+
+suppressMessages(library(ggplot2))
+suppressMessages(library(caret))
+suppressMessages(library(randomForest))
+suppressMessages(library(ggpubr))
+suppressMessages(library(MuMIn))
+suppressMessages(library(dplyr))
+suppressMessages(library(viridis))
+suppressMessages(library(grid))
+suppressMessages(library(car))
+suppressMessages(library(respR))
+#suppressMessages(library(LakeMetabolizer))
+
+```
+
+
+# Data upload function:
+```{r}
+
+# Upload the data from a total data file:
+# total_data <- read.csv("Total_Sat_Data_All_Var.csv")
+
+# Create a function for reading and preprocessing data from the file:
+Read_fn <- function(file) {
+  
+  
+  data <- read.csv(file)  # Read the csv
+  
+  data <- data %>% 
+    mutate(HBE = if_else(Chl > 2.5, 1, 0))
+  
+  
+  # Total dataset:
+  all_data <- data
+  
+  # Only Pacific data:
+  Pacific_data = data[data$Area=='ESNP', ]
+  #Pacific_data = Pacific_data[Pacific_data$Test_Cruise!='Summer_2022', ]
+  Pacific_data = subset(Pacific_data, select=-c(Area))  # Remove redundant area variable
+  Pacific_data_test = Pacific_data
+  #Pacific_data <- na.omit(Pacific_data)
+  
+  # Only Arctic data:
+  Arctic_data = data[data$Area=='BS-CB', ]
+  Arctic_data = subset(Arctic_data, select=-c(Area))
+  #Arctic_data <- na.omit(Arctic_data)
+  
+  
+  # Only Bering Strait data:
+  Bering_data = data[data$Area=='BE-CH', ]
+  Bering_data = subset(Bering_data, select=-c(Area))
+  #Bering_data <- na.omit(Bering_data)
+  
+  # Merge into a list:
+  dataset <- list(all_data, Pacific_data, Arctic_data, Bering_data, Pacific_data_test)
+
+  
+  return(dataset)
+  
+}
+
+
+# Input required files into function (from previous file):
+Pacific_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[2])
+Pacific_data_test <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[5])
+Arctic_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[3])
+Bering_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[4])
+all_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[1])
+
+
+```
