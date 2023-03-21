@@ -17,7 +17,7 @@ suppressMessages(library(viridis))
 suppressMessages(library(grid))
 suppressMessages(library(car))
 suppressMessages(library(respR))
-#suppressMessages(library(LakeMetabolizer))
+
 
 ```
 
@@ -25,7 +25,7 @@ suppressMessages(library(respR))
 # Data upload function:
 ```{r}
 
-# Upload the data from a total data file:asadaa
+# Upload the data from a total data file:
 # total_data <- read.csv("Total_Sat_Data_All_Var.csv")
 
 # Create a function for reading and preprocessing data from the file:
@@ -77,3 +77,146 @@ all_data <- as.data.frame(Read_fn("MODEL_DATA_GLOBAL_FINAL_Woutlier.csv")[1])
 
 
 ```
+
+
+# Create variables for Apparent Oxygen Utilization (AOU) and Solar Radiaiton Dose (SRD):
+```{r}
+
+# SRD:
+
+Pacific_data$Sat_PAR_watts <- Pacific_data$Sat_PAR * 0.21739130434  # Convert PAR to Wm2
+all_data$Sat_PAR_watts <- all_data$Sat_PAR * 0.21739130434  # Convert PAR to Wm2
+
+Pacific_data$SRD <- ((Pacific_data$Sat_PAR_watts / (Pacific_data$AC * Pacific_data$MLD)) * (1 - exp((Pacific_data$AC*-1) * Pacific_data$MLD)))  # Calculate SRD
+
+all_data$SRD <- ((all_data$Sat_PAR_watts / (all_data$AC * all_data$MLD)) * (1 - exp((all_data$AC*-1) * all_data$MLD)))  # Calculate SRD
+
+# AOU
+Pacific_data$DO_eq <- convert_DO(Pacific_data$O2_equil_conc, # data to convert
+                   from = "umol/Kg",     # oxygen unit to convert from
+                   to = "mg/L",    # oxygen unit to convert to
+                   t = Pacific_data$Temperature,            # in C
+                   S = Pacific_data$Salinity            # in ppt
+                   )         # in bar
+
+Pacific_data$DO_meas <- convert_DO(Pacific_data$DO, # data to convert
+                   from = "ml/L",     # oxygen unit to convert from
+                   to = "mg/L",    # oxygen unit to convert to
+                   t = Pacific_data$Temperature,            # in C
+                   S = Pacific_data$Salinity            # in ppt
+                   )         # in bar
+
+# all_data$DO_eq <- convert_DO(all_data$O2_equil_conc, # data to convert
+#                    from = "umol/Kg",     # oxygen unit to convert from
+#                    to = "mg/L",    # oxygen unit to convert to
+#                    t = all_data$Temperature,            # in C
+#                    S = all_data$Salinity            # in ppt
+#                    )         # in bar
+# 
+# all_data$DO_meas <- convert_DO(all_data$DO, # data to convert
+#                    from = "ml/L",     # oxygen unit to convert from
+#                    to = "mg/L",    # oxygen unit to convert to
+#                    t = all_data$Temperature,            # in C
+#                    S = all_data$Salinity            # in ppt
+#                    )         # in bar
+
+# Calculate produced DO
+Pacific_data$DO_Prod <- as.numeric(Pacific_data$DO_meas - Pacific_data$DO_eq)
+
+
+
+
+```
+
+# Sort and index data with relevant variables and all numeric:
+```{r}
+
+pacific.learning.ds <- data.frame(Pacific_data %>% # all vars of interest
+  dplyr::select(TEP, Log_Chl, POC, DO_Prod, #DO,
+                Temperature, MLD, WS, Salinity,
+                Nitrate, Phosphate, Silicate, SRD, Sat_PAR, Seasons
+                ))
+
+```
+
+# Create a random seed, training and testing sets:
+```{r}
+
+set.seed(222)
+ind <- sample(2, nrow(pacific.learning.ds), replace = TRUE, prob = c(0.8, 0.2))
+train <- pacific.learning.ds[ind==1,]
+test <- pacific.learning.ds[ind==2,]
+
+```
+
+# Random Forest call:
+```{r}
+
+# Told RF model:
+rf <- randomForest(TEP~., data=pacific.learning.ds, na.action = na.omit, importance = TRUE) 
+
+# Create a plot to visualize variable importance in the model:
+imp <- varImpPlot(rf, type = 1)
+
+# this part just creates the data.frame for the plot part
+imp <- as.data.frame(imp)
+imp$varnames <- rownames(imp) # row names to column
+imp$varnames <- c("Chlorophyll a", "POC", "AOU", "Temperature", "MLD", "Wind speed", "Salinity", 
+                  "Nitrate", "Phosphate", "Silicic Acid", "SRD", "24h-PAR", "Season")
+rownames(imp) <- NULL  
+imp$IncMSE.percent <- imp$`%IncMSE`
+imp$driver <- c("Source", "Source", "Source", "Direct Environ.",
+                "Indirect Environ.", "Indirect Environ.", "Indirect Environ.", 
+                "Direct Environ.", "Direct Environ.", "Direct Environ.", # nuts
+                "Indirect Environ.", "Indirect Environ.", "Indirect Environ.")  #  driver categories
+ 
+ggplot(imp, aes(x=reorder(varnames, IncMSE.percent), y = IncMSE.percent, fill = driver)) + 
+  geom_point(size = 2.5, colour = 'black', pch = 21) +
+  #geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = IncMSE.percent), 
+               #lty = 'dashed') +
+  scale_color_discrete(name="Variable Group") +
+  ylab("Mean Decrease Accuracy (%)") +
+  xlab("") +
+  scale_fill_manual(values = c("blue", "darkcyan", "yellow4")) +
+  coord_flip() +
+  theme_bw() +
+  theme(panel.grid.major.y = element_blank(), legend.title = element_blank())
+  
+
+```
+
+# Predictions and Confusion matrix:
+```{r}
+
+# Training RF model:
+rf <- randomForest(TEP~., data=train, proximity=TRUE, type = "regression") 
+
+train$tep.predictions <- predict(rf, train)
+train$id <- "train"
+
+test$tep.predictions <- predict(rf, test)
+test$id <- "test"
+
+rf.data <- rbind(train, test)
+
+ggplot(rf.data, aes(TEP, tep.predictions, colour = id)) +
+  geom_point() +
+  ylim(0, 150) +
+  xlim(0, 150) +
+  geom_abline(slope = 1, intercepot = 0, lty = 'dashed') +
+  theme_bw()
+
+MAE(test$tep.predictions, test$TEP)
+RMSE(test$tep.predictions, test$TEP)
+
+
+# p2 <- as.factor(predict(rf, test))
+# confusionMatrix(factor(tests[,1]), factor(tests[,2]))
+# 
+# 
+
+
+```
+
+# Predictor importance:
+
