@@ -165,9 +165,8 @@ imp$driver <- c("Source", "Source", "Source", "Direct Environ.",
  
 RFplot <- ggplot(imp, aes(x=reorder(varnames, IncMSE.percent), 
                           y = IncMSE.percent, fill = driver, colour = driver)) + 
-  geom_point(size = 4, pch = 21) +
-  #geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = IncMSE.percent), 
-               #lty = 'dashed') +
+  geom_point(size = 5, pch = 21) +
+  geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = IncMSE.percent)) +
   scale_color_discrete(name="Variable Group") +
   ylab("Mean Decrease Accuracy (%)") +
   xlab("") +
@@ -264,10 +263,10 @@ RMSE(test$tep.predictions, test$TEP)
 # First, derive multiple linear regression models (MLRs) from the dataset:
 
 # Final model versions:
-ESNP.final.model <- lm(TEP ~ Log_Chl + Temperature + Phosphate + DO_Prod, 
+ESNP.final.model <- lm(TEP ~ Log_Chl + Temperature + Nitrate + DO_Prod + MLD, 
                           data = as.data.frame(scale(
                             pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
-ESNP.alt.model <- lm(TEP ~ Log_Chl + Temperature + DO_Prod + MLD + Nitrate 
+ESNP.alt.model <- lm(TEP ~ Log_Chl + Temperature + DO_Prod + MLD #+ Nitrate 
                      + POC + WS + SRD + Sat_PAR + Phosphate + Silicate + Salinity + Seasons, 
                           data = as.data.frame(scale(
                             pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
@@ -311,11 +310,11 @@ CoefficientPlot <- function(models, alpha = 0.1,
   MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
 
   OutputPlot <- qplot(IV, Estimate, 
-                      ymin = Estimate - Multiplier * StandardError, 
-                      ymax = Estimate + Multiplier * StandardError, 
+                      ymin = Estimate - Multiplier * StandardError,
+                      ymax = Estimate + Multiplier * StandardError,
                       data = MatrixofModels, geom = "pointrange", 
                       ylab = NULL, xlab = NULL, 
-                      group = ModelLevel, shape = ModelLevel, 
+                      group = ModelLevel, shape = ModelLevel, alpha = ModelLevel,
                       colour = driver, fill = driver, size = I(1)) +
     geom_hline(yintercept = 0, lwd = I(7/12), colour = I(hsv(0/12, 7/12, 7/12)), 
               alpha = I(5/12)) +
@@ -341,7 +340,8 @@ CoefficientPlot <- function(models, alpha = 0.1,
     # scale_fill_viridis() +
     # scale_color_viridis() +
     xlab("") +
-    scale_alpha(range = c(1, 0)) +
+    #scale_alpha_continuous(range = c(0.5, 1)) +
+    scale_alpha_manual(values = c(1, 0)) +
     theme(legend.title = element_blank(), legend.position = "top") +
     #geom_smooth(formula = y ~ poly(x, 4), na.rm = TRUE) +
     #ylim(-0.6, 1) +
@@ -355,17 +355,28 @@ MLRplot <- CoefficientPlot(model_list)
 
 # Choose the color scheme corresponding to each parameter:
 driver <- c("Source", "Source", "Direct Environ.", "Direct Environ.",
-                "Source", "Direct Environ.", "Source", 
+                "Source", "Indirect Environ.", "Indirect Environ.",
+                "Source", 
                 "Direct Environ.", "Source", "Indirect Environ.", # nuts
-                "Direct Environ.", "Source", "Indirect Environ.",
+                #"Direct Environ.", 
+                "Source", "Indirect Environ.",
                 "Indirect Environ.", "Indirect Environ.", "Direct Environ.", "Direct Environ.",
                 "Indirect Environ.", "Indirect Environ.")  #  driver categories
 
-# order: Log_Chl, Temperature, Phosphate, DO_Prod, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS, SRD,
+# order: Log_Chl, Temperature, Nitrate, DO_Prod, MLD, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS, SRD,
 # Sat_PAR, Phosphate, Silicate, Salinity, Seasons
+
+# print the pdf:
+pdf(file = "Coefficients.pdf",   # The directory you want to save the file in
+    width = 12, # The width of the plot in inches
+    height = 6) # The height of the plot in inches
 
 
 ggarrange(RFplot, MLRplot, common.legend = TRUE)
+
+
+dev.off()
+
 
 ```
 
