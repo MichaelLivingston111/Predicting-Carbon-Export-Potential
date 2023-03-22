@@ -17,6 +17,8 @@ suppressMessages(library(viridis))
 suppressMessages(library(grid))
 suppressMessages(library(car))
 suppressMessages(library(respR))
+suppressMessages(library(rfviz))
+suppressMessages(library(tidyverse))
 
 
 ```
@@ -139,16 +141,6 @@ pacific.learning.ds <- data.frame(Pacific_data %>% # all vars of interest
 
 ```
 
-# Create a random seed, training and testing sets:
-```{r}
-
-set.seed(222)
-ind <- sample(2, nrow(pacific.learning.ds), replace = TRUE, prob = c(0.8, 0.2))
-train <- pacific.learning.ds[ind==1,]
-test <- pacific.learning.ds[ind==2,]
-
-```
-
 # Random Forest call:
 ```{r}
 
@@ -157,6 +149,7 @@ rf <- randomForest(TEP~., data=pacific.learning.ds, na.action = na.omit, importa
 
 # Create a plot to visualize variable importance in the model:
 imp <- varImpPlot(rf, type = 1)
+
 
 # this part just creates the data.frame for the plot part
 imp <- as.data.frame(imp)
@@ -170,18 +163,53 @@ imp$driver <- c("Source", "Source", "Source", "Direct Environ.",
                 "Direct Environ.", "Direct Environ.", "Direct Environ.", # nuts
                 "Indirect Environ.", "Indirect Environ.", "Indirect Environ.")  #  driver categories
  
-ggplot(imp, aes(x=reorder(varnames, IncMSE.percent), y = IncMSE.percent, fill = driver)) + 
-  geom_point(size = 2.5, colour = 'black', pch = 21) +
+RFplot <- ggplot(imp, aes(x=reorder(varnames, IncMSE.percent), 
+                          y = IncMSE.percent, fill = driver, colour = driver)) + 
+  geom_point(size = 4, pch = 21) +
   #geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = IncMSE.percent), 
                #lty = 'dashed') +
   scale_color_discrete(name="Variable Group") +
   ylab("Mean Decrease Accuracy (%)") +
   xlab("") +
   scale_fill_manual(values = c("blue", "darkcyan", "yellow4")) +
+  scale_colour_manual(values = c("blue", "darkcyan", "yellow4")) +
   coord_flip() +
   theme_bw() +
+  ggtitle("Random Forest Regression") +
   theme(panel.grid.major.y = element_blank(), legend.title = element_blank())
   
+
+```
+
+# Visualize the RF:
+```{r}
+
+# data_x <- data.frame(pacific.learning.ds %>% # all vars of interest
+#   dplyr::select(Log_Chl, POC, DO_Prod, #DO,
+#                 Temperature, MLD, WS, Salinity,
+#                 Nitrate, Phosphate, Silicate, SRD, Sat_PAR, Seasons
+#                 ))
+# 
+# data_y <- pacific.learning.ds$TEP
+# 
+# rfprep <- rf_prep(data_x, data_y)
+# varImpPlot(rfprep$rf)
+# 
+# bcrf <- rf_viz(rfprep, input=TRUE, imp=TRUE, cmd=TRUE)
+
+
+```
+
+
+
+
+# Create a random seed, training and testing sets:
+```{r}
+
+set.seed(222)
+ind <- sample(2, nrow(pacific.learning.ds), replace = TRUE, prob = c(0.8, 0.2))
+train <- pacific.learning.ds[ind==1,]
+test <- pacific.learning.ds[ind==2,]
 
 ```
 
@@ -218,5 +246,132 @@ RMSE(test$tep.predictions, test$TEP)
 
 ```
 
-# Predictor importance:
+# Predict historical changes with the RF model:
+```{r}
+
+# # Upload Line P data:
+# spring_hist <- read.csv("Spring_hist_withO2.csv")
+# summer_hist <- read.csv("Summer_hist_withO2.csv")
+# winter_hist <- read.csv("Winter_hist_withO2.csv")
+
+
+
+```
+
+# Compare Random Forest model with multiple linear regression models:
+```{r}
+
+# First, derive multiple linear regression models (MLRs) from the dataset:
+
+# Final model versions:
+ESNP.final.model <- lm(TEP ~ Log_Chl + Temperature + Phosphate + DO_Prod, 
+                          data = as.data.frame(scale(
+                            pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
+ESNP.alt.model <- lm(TEP ~ Log_Chl + Temperature + DO_Prod + MLD + Nitrate 
+                     + POC + WS + SRD + Sat_PAR + Phosphate + Silicate + Salinity + Seasons, 
+                          data = as.data.frame(scale(
+                            pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
+
+# List models:
+model_list <- list(ESNP.final.model, ESNP.alt.model)
+model_names <- c("ESNP", "ESNP")
+model_level <- c("ESNP", "ESNP-total")
+
+
+CoefficientPlot <- function(models, alpha = 0.1, 
+                            modelnames = model_names, modellevel = model_level){
+  # models must be a list()
+
+  Multiplier <- qnorm(1 - alpha / 2)
+  CoefficientTables <- lapply(models, function(x){summary(x)$coef})
+  TableRows <- unlist(lapply(CoefficientTables, nrow))
+
+  if(modelnames[1] == ""){
+    ModelNameLabels <- rep(paste("Model", 1:length(TableRows)), TableRows)
+    } else {
+    ModelNameLabels <- rep(modelnames, TableRows)
+    }
+  
+    if(modellevel[1] == ""){
+    ModelLevelLabels <- rep(paste("Level", 1:length(TableRows)), TableRows)
+    } else {
+    ModelLevelLabels <- rep(modellevel, TableRows)
+    }
+
+  MatrixofModels <- cbind(do.call(rbind, CoefficientTables), ModelNameLabels, ModelLevelLabels)
+  MatrixofModels <- data.frame(cbind(rownames(MatrixofModels), MatrixofModels, ModelLevelLabels))
+  colnames(MatrixofModels) <- c("IV", "Estimate", "StandardError", 
+                                "TValue", "PValue", "ModelName", "ModelLevel")
+  MatrixofModels$ModelLevel = factor(MatrixofModels$ModelLevel, 
+                                    levels = c("ESNP", "ESNP-total"))
+  MatrixofModels$ModelName = factor(MatrixofModels$ModelName, 
+                                    levels = c("ESNP", "ESNP-total"))
+  #MatrixofModels$IV <- factor(MatrixofModels$IV, levels = MatrixofModels$IV)
+  #MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
+  MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
+
+  OutputPlot <- qplot(IV, Estimate, 
+                      ymin = Estimate - Multiplier * StandardError, 
+                      ymax = Estimate + Multiplier * StandardError, 
+                      data = MatrixofModels, geom = "pointrange", 
+                      ylab = NULL, xlab = NULL, 
+                      group = ModelLevel, shape = ModelLevel, 
+                      colour = driver, fill = driver, size = I(1)) +
+    geom_hline(yintercept = 0, lwd = I(7/12), colour = I(hsv(0/12, 7/12, 7/12)), 
+              alpha = I(5/12)) +
+    coord_flip() + theme_bw() +
+    theme(panel.grid.major.y = element_blank(), legend.title = element_blank()) +
+    ggtitle("Multiple Linear Regression") +
+    #geom_point(colour = 'black') +
+    scale_x_discrete(limits = c(
+                                "Salinity", "SRD", "WS", 
+                                "Silicate", "Phosphate", "Nitrate", 
+                                "Seasons", "MLD", "Sat_PAR",
+                                "DO_Prod", "Temperature", "POC", "Log_Chl"),
+                      labels = NULL) +
+                     # labels = c("Salinity", "SRD", "WS", 
+                     #            "Silicic acid", "Phosphate", "Nitrate", 
+                     #            "Season", "MLD", "24h-PAR",
+                     #            "AOU", "Temperature", "POC", "Chlorophyll a (log)")) +
+    scale_shape_manual(values = c("ESNP" = 19, "ESNP-total" = 1)) + 
+    scale_fill_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
+                                 "Indirect Environ." = "darkcyan")) +
+    scale_colour_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
+                                 "Indirect Environ." = "darkcyan")) +
+    # scale_fill_viridis() +
+    # scale_color_viridis() +
+    xlab("") +
+    scale_alpha(range = c(1, 0)) +
+    theme(legend.title = element_blank(), legend.position = "top") +
+    #geom_smooth(formula = y ~ poly(x, 4), na.rm = TRUE) +
+    #ylim(-0.6, 1) +
+    xlab("")
+  
+  return(OutputPlot)
+}
+
+
+MLRplot <- CoefficientPlot(model_list)
+
+# Choose the color scheme corresponding to each parameter:
+driver <- c("Source", "Source", "Direct Environ.", "Direct Environ.",
+                "Source", "Direct Environ.", "Source", 
+                "Direct Environ.", "Source", "Indirect Environ.", # nuts
+                "Direct Environ.", "Source", "Indirect Environ.",
+                "Indirect Environ.", "Indirect Environ.", "Direct Environ.", "Direct Environ.",
+                "Indirect Environ.", "Indirect Environ.")  #  driver categories
+
+# order: Log_Chl, Temperature, Phosphate, DO_Prod, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS, SRD,
+# Sat_PAR, Phosphate, Silicate, Salinity, Seasons
+
+
+ggarrange(RFplot, MLRplot, common.legend = TRUE)
+
+```
+
+
+
+
+
+
 
