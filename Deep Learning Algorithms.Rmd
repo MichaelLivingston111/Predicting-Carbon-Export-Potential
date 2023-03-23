@@ -108,23 +108,28 @@ Pacific_data$DO_meas <- convert_DO(Pacific_data$DO, # data to convert
                    S = Pacific_data$Salinity            # in ppt
                    )         # in bar
 
-# all_data$DO_eq <- convert_DO(all_data$O2_equil_conc, # data to convert
-#                    from = "umol/Kg",     # oxygen unit to convert from
-#                    to = "mg/L",    # oxygen unit to convert to
-#                    t = all_data$Temperature,            # in C
-#                    S = all_data$Salinity            # in ppt
-#                    )         # in bar
-# 
-# all_data$DO_meas <- convert_DO(all_data$DO, # data to convert
-#                    from = "ml/L",     # oxygen unit to convert from
-#                    to = "mg/L",    # oxygen unit to convert to
-#                    t = all_data$Temperature,            # in C
-#                    S = all_data$Salinity            # in ppt
-#                    )         # in bar
+
+# Remove nans from DO column from total dataframe:
+all_data <- all_data[!is.na(all_data$O2_equil_conc),]
+
+
+all_data$DO_eq <- convert_DO(all_data$O2_equil_conc, # data to convert
+                   from = "umol/Kg",     # oxygen unit to convert from
+                   to = "mg/L",    # oxygen unit to convert to
+                   t = all_data$Temperature,            # in C
+                   S = all_data$Salinity            # in ppt
+                   )         # in bar
+
+all_data$DO_meas <- convert_DO(all_data$DO, # data to convert
+                   from = "ml/L",     # oxygen unit to convert from
+                   to = "mg/L",    # oxygen unit to convert to
+                   t = all_data$Temperature,            # in C
+                   S = all_data$Salinity            # in ppt
+                   )         # in bar
 
 # Calculate produced DO
 Pacific_data$DO_Prod <- as.numeric(Pacific_data$DO_meas - Pacific_data$DO_eq)
-
+all_data$DO_Prod <- as.numeric(all_data$DO_meas - all_data$DO_eq)
 
 
 
@@ -139,16 +144,24 @@ pacific.learning.ds <- data.frame(Pacific_data %>% # all vars of interest
                 Nitrate, Phosphate, Silicate, SRD, Sat_PAR, Seasons
                 ))
 
+all.learning.ds <- data.frame(all_data %>% # all vars of interest
+  dplyr::select(TEP, Log_Chl, POC, DO_Prod, #DO,
+                Temperature, MLD, WS, Salinity,
+                Nitrate, Phosphate, Silicate, Seasons
+                ))
+
 ```
 
 # Random Forest call:
 ```{r}
 
-# Told RF model:
-rf <- randomForest(TEP~., data=pacific.learning.ds, na.action = na.omit, importance = TRUE) 
+# Told RF models:
+rf <- randomForest(TEP~., data=pacific.learning.ds, na.action = na.omit, importance = TRUE)  # Pacific
+rf.all <- randomForest(TEP~., data=all.learning.ds, na.action = na.omit, importance = TRUE)  # All data
 
 # Create a plot to visualize variable importance in the model:
 imp <- varImpPlot(rf, type = 1)
+imp.all <- varImpPlot(rf.all, type = 1)
 
 
 # this part just creates the data.frame for the plot part
@@ -267,7 +280,7 @@ ESNP.final.model <- lm(TEP ~ Log_Chl + Temperature + Nitrate + DO_Prod + MLD,
                           data = as.data.frame(scale(
                             pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
 ESNP.alt.model <- lm(TEP ~ Log_Chl + Temperature + DO_Prod + MLD #+ Nitrate 
-                     + POC + WS + SRD + Sat_PAR + Phosphate + Silicate + Salinity + Seasons, 
+                     + POC + WS + Phosphate, 
                           data = as.data.frame(scale(
                             pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
 
@@ -341,7 +354,7 @@ CoefficientPlot <- function(models, alpha = 0.1,
     # scale_color_viridis() +
     xlab("") +
     #scale_alpha_continuous(range = c(0.5, 1)) +
-    scale_alpha_manual(values = c(1, 0)) +
+    scale_alpha_manual(values = c(1, 1)) +
     theme(legend.title = element_blank(), legend.position = "top") +
     #geom_smooth(formula = y ~ poly(x, 4), na.rm = TRUE) +
     #ylim(-0.6, 1) +
@@ -360,8 +373,146 @@ driver <- c("Source", "Source", "Direct Environ.", "Direct Environ.",
                 "Direct Environ.", "Source", "Indirect Environ.", # nuts
                 #"Direct Environ.", 
                 "Source", "Indirect Environ.",
+                "Direct Environ.")  #  driver categories
+
+# order: Log_Chl, Temperature, Nitrate, DO_Prod, MLD, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS,
+# Phosphate
+
+# print the pdf:
+pdf(file = "Coefficients.pdf",   # The directory you want to save the file in
+    width = 12, # The width of the plot in inches
+    height = 6) # The height of the plot in inches
+
+
+ggarrange(RFplot, MLRplot, common.legend = TRUE)
+
+
+dev.off()
+
+
+```
+
+# Compare Random Forest model with multiple linear regression models: Different style:
+```{r}
+
+# First, derive multiple linear regression models (MLRs) from the dataset:
+
+# Final model versions:
+ESNP.final.model <- lm(TEP ~ Log_Chl + Temperature + Nitrate + DO_Prod, 
+                          data = as.data.frame(scale(
+                            pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
+ESNP.alt.model <- lm(TEP ~ POC + MLD + Phosphate + DO_Prod + WS, 
+                          data = as.data.frame(scale(
+                            pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
+
+ESNP.alt.model2 <- lm(TEP ~ Log_Chl + Temperature + DO_Prod + MLD #+ Nitrate 
+                     + POC + WS + SRD + Sat_PAR + Phosphate + Silicate + Salinity + Seasons, 
+                          data = as.data.frame(scale(
+                            pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
+
+
+# ESNP.alt.model <- lm(TEP ~ POC + MLD + Phosphate + DO_Prod + WS,
+#                           data = pacific.learning.ds)
+# 
+# summary(ESNP.alt.model)  # summary
+# ModelVal(ESNP.alt.modell, pacific.learning.ds)  # plots
+# car::vif(ESNP.alt.model)  # multi-collinearity
+# ols_test_normality(resid(ESNP.alt.model))  # normality
+# plot(ESNP.alt.model)
+
+# List models:
+model_list <- list(ESNP.final.model, ESNP.alt.model, ESNP.alt.model2)
+model_names <- c("ESNP", "ESNP", "ESNP")
+model_level <- c("ESNP", "ESNP-total", "ESNP-blank")
+
+
+CoefficientPlot <- function(models, alpha = 0.1, 
+                            modelnames = model_names, modellevel = model_level){
+  # models must be a list()
+
+  Multiplier <- qnorm(1 - alpha / 2)
+  CoefficientTables <- lapply(models, function(x){summary(x)$coef})
+  TableRows <- unlist(lapply(CoefficientTables, nrow))
+
+  if(modelnames[1] == ""){
+    ModelNameLabels <- rep(paste("Model", 1:length(TableRows)), TableRows)
+    } else {
+    ModelNameLabels <- rep(modelnames, TableRows)
+    }
+  
+    if(modellevel[1] == ""){
+    ModelLevelLabels <- rep(paste("Level", 1:length(TableRows)), TableRows)
+    } else {
+    ModelLevelLabels <- rep(modellevel, TableRows)
+    }
+
+  MatrixofModels <- cbind(do.call(rbind, CoefficientTables), ModelNameLabels, ModelLevelLabels)
+  MatrixofModels <- data.frame(cbind(rownames(MatrixofModels), MatrixofModels, ModelLevelLabels))
+  colnames(MatrixofModels) <- c("IV", "Estimate", "StandardError", 
+                                "TValue", "PValue", "ModelName", "ModelLevel")
+  MatrixofModels$ModelLevel = factor(MatrixofModels$ModelLevel, 
+                                    levels = c("ESNP", "ESNP-total", "ESNP-blank"))
+  MatrixofModels$ModelName = factor(MatrixofModels$ModelName, 
+                                    levels = c("ESNP", "ESNP-total", "ESNP-blank"))
+  #MatrixofModels$IV <- factor(MatrixofModels$IV, levels = MatrixofModels$IV)
+  #MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
+  MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
+
+  OutputPlot <- qplot(IV, Estimate, 
+                      ymin = Estimate - Multiplier * StandardError,
+                      ymax = Estimate + Multiplier * StandardError,
+                      data = MatrixofModels, geom = "pointrange", 
+                      ylab = NULL, xlab = NULL, 
+                      group = ModelLevel, shape = ModelLevel, alpha = ModelLevel,
+                      colour = abs(Estimate), fill = abs(Estimate), size = I(1)) +
+    geom_hline(yintercept = 0, lwd = I(7/12), colour = I(hsv(0/12, 7/12, 7/12)), 
+              alpha = I(5/12)) +
+    coord_flip() + theme_bw() +
+    theme(panel.grid.major.y = element_blank(), legend.title = element_blank()) +
+    ggtitle("Multiple Linear Regression") +
+    #geom_point(colour = 'black') +
+    scale_x_discrete(limits = c(
+                                "Salinity", "SRD", "PAR", "Seasons",
+                                "WS", "MLD",
+                                "Silicate", "Phosphate", "Nitrate", "Temperature",
+                                "DO_Prod", "POC", "Log_Chl"),
+                     labels = c("Salinity", "SRD", "24h-PAR", "Season",
+                                "WS", "MLD",
+                                "Silicic acid", "Phosphate", "Nitrate", "Temperature",
+                                "AOU", "POC", "Chlorophyll a (log)")) +
+    #scale_shape_manual(values = c("ESNP" = 19, "ESNP-total" = 17)) + 
+    scale_colour_viridis(option = 'D') +
+    scale_fill_viridis(option = 'D') +
+    # scale_fill_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
+    #                              "Indirect Environ." = "darkcyan")) +
+    # scale_colour_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
+    #                              "Indirect Environ." = "darkcyan")) +
+    # scale_fill_viridis() +
+    # scale_color_viridis() +
+    #scale_alpha_continuous(range = c(0.5, 1)) +
+    scale_alpha_manual(values = c(1, 1, 0)) +
+    theme(legend.title = element_blank(), legend.position = "top")
+    #geom_smooth(formula = y ~ poly(x, 4), na.rm = TRUE) +
+    #ylim(-0.6, 1) +
+    #xlab("")
+  
+  return(OutputPlot)
+}
+
+
+MLRplot <- CoefficientPlot(model_list)
+
+# Choose the color scheme corresponding to each parameter:
+driver <- c("Source", "Source", "Direct Environ.", "Direct Environ.",
+                "Source", "Indirect Environ.", "Indirect Environ.",
+                "Source", 
+                "Direct Environ.", "Source", "Indirect Environ.", # nuts
+                #"Direct Environ.", 
+                "Source", "Indirect Environ.",
                 "Indirect Environ.", "Indirect Environ.", "Direct Environ.", "Direct Environ.",
-                "Indirect Environ.", "Indirect Environ.")  #  driver categories
+                "Indirect Environ.", "Indirect Environ.", "Indirect Environ.",
+                "Source", 
+                "Direct Environ.", "Source", "Indirect Environ.")  #  driver categories
 
 # order: Log_Chl, Temperature, Nitrate, DO_Prod, MLD, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS, SRD,
 # Sat_PAR, Phosphate, Silicate, Salinity, Seasons
@@ -379,8 +530,6 @@ dev.off()
 
 
 ```
-
-
 
 
 
