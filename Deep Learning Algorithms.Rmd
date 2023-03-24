@@ -19,6 +19,7 @@ suppressMessages(library(car))
 suppressMessages(library(respR))
 suppressMessages(library(rfviz))
 suppressMessages(library(tidyverse))
+suppressMessages(library(olsrr))
 
 
 ```
@@ -147,8 +148,10 @@ pacific.learning.ds <- data.frame(Pacific_data %>% # all vars of interest
 all.learning.ds <- data.frame(all_data %>% # all vars of interest
   dplyr::select(TEP, Log_Chl, POC, DO_Prod, #DO,
                 Temperature, MLD, WS, Salinity,
-                Nitrate, Phosphate, Silicate, Seasons
+                Nitrate, Phosphate, Silicate, Seasons, Area
                 ))
+
+all.learning.ds$Area <- as.numeric(as.factor((all.learning.ds$Area))) # Transform categorical variable to numeric
 
 ```
 
@@ -158,6 +161,7 @@ all.learning.ds <- data.frame(all_data %>% # all vars of interest
 # Told RF models:
 rf <- randomForest(TEP~., data=pacific.learning.ds, na.action = na.omit, importance = TRUE)  # Pacific
 rf.all <- randomForest(TEP~., data=all.learning.ds, na.action = na.omit, importance = TRUE)  # All data
+
 
 # Create a plot to visualize variable importance in the model:
 imp <- varImpPlot(rf, type = 1)
@@ -181,15 +185,56 @@ RFplot <- ggplot(imp, aes(x=reorder(varnames, IncMSE.percent),
   geom_point(size = 5, pch = 21) +
   geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = IncMSE.percent)) +
   scale_color_discrete(name="Variable Group") +
+  ylab("") +
+  xlab("") +
+  scale_fill_manual(values = c("blue", "darkcyan", "yellow4")) +
+  scale_colour_manual(values = c("blue", "darkcyan", "yellow4")) +
+  scale_x_discrete(limits = c(
+                              "Salinity", "SRD", "Wind speed", "24h-PAR", "MLD",
+                              "Silicic Acid","Phosphate", "Nitrate", "Temperature",
+                              "AOU", "POC", "Chlorophyll a")) +
+  ylim(0, 25) +
+  coord_flip() +
+  theme_bw() +
+  ggtitle("ESNP: Random Forest Regression") +
+  theme(panel.grid.major.y = element_blank(), legend.title = element_blank(),
+        plot.title = element_text(size = 6, face = "bold"))
+
+
+# All data
+imp.all <- as.data.frame(imp.all)
+imp.all$varnames <- rownames(imp.all) # row names to column
+imp.all$varnames <- c("Chlorophyll a", "POC", "AOU", "Temperature", "MLD", "Wind speed", "Salinity", 
+                  "Nitrate", "Phosphate", "Silicic Acid", "Season", "Area")
+rownames(imp.all) <- NULL  
+imp.all$IncMSE.percent <- imp.all$`%IncMSE`
+imp.all$driver <- c("Source", "Source", "Source", "Direct Environ.",
+                "Indirect Environ.", "Indirect Environ.", "Indirect Environ.", 
+                "Direct Environ.", "Direct Environ.", "Direct Environ.", # nuts
+                "Indirect Environ.", "Indirect Environ.")  #  driver categories
+ 
+RFplot.all <- ggplot(imp.all, aes(x = varnames, y = IncMSE.percent, fill = driver, colour = driver)) + 
+  geom_point(size = 5, pch = 21) +
+  geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = IncMSE.percent)) +
+  scale_color_discrete(name="Variable Group") +
   ylab("Mean Decrease Accuracy (%)") +
   xlab("") +
   scale_fill_manual(values = c("blue", "darkcyan", "yellow4")) +
   scale_colour_manual(values = c("blue", "darkcyan", "yellow4")) +
+  scale_x_discrete(limits = c(
+                              "Area", "Salinity", "Wind speed", "MLD",
+                              "Silicic Acid","Phosphate", "Nitrate", "Temperature",
+                              "AOU", "POC", "Chlorophyll a")) +
+  ylim(0, 25) +
   coord_flip() +
   theme_bw() +
-  ggtitle("Random Forest Regression") +
-  theme(panel.grid.major.y = element_blank(), legend.title = element_blank())
+  ggtitle("Total Scope: Random Forest Regression") +
+  theme(panel.grid.major.y = element_blank(), legend.title = element_blank(), 
+        legend.position = "none", plot.title = element_text(size = 6, face = "bold"))
   
+  
+
+ggarrange(RFplot, RFplot.all, common.legend = TRUE)
 
 ```
 
@@ -270,7 +315,7 @@ RMSE(test$tep.predictions, test$TEP)
 
 ```
 
-# Compare Random Forest model with multiple linear regression models:
+#  Multiple linear regression models: ESNP
 ```{r}
 
 # First, derive multiple linear regression models (MLRs) from the dataset:
@@ -333,31 +378,26 @@ CoefficientPlot <- function(models, alpha = 0.1,
               alpha = I(5/12)) +
     coord_flip() + theme_bw() +
     theme(panel.grid.major.y = element_blank(), legend.title = element_blank()) +
-    ggtitle("Multiple Linear Regression") +
+    ggtitle("ESNP: Multiple Linear Regression") +
     #geom_point(colour = 'black') +
     scale_x_discrete(limits = c(
-                                "Salinity", "SRD", "WS", 
-                                "Silicate", "Phosphate", "Nitrate", 
-                                "Seasons", "MLD", "Sat_PAR",
-                                "DO_Prod", "Temperature", "POC", "Log_Chl"),
-                      labels = NULL) +
-                     # labels = c("Salinity", "SRD", "WS", 
-                     #            "Silicic acid", "Phosphate", "Nitrate", 
-                     #            "Season", "MLD", "24h-PAR",
-                     #            "AOU", "Temperature", "POC", "Chlorophyll a (log)")) +
+                                "Salinity", "SRD", "WS", "Sat_PAR", "MLD",
+                                "Silicate", "Phosphate", "Nitrate", "Temperature",
+                                "DO_Prod", "POC", "Log_Chl"), 
+                     labels = c(
+                              "Salinity", "SRD", "Wind speed", "24h-PAR", "MLD",
+                              "Silicic Acid","Phosphate", "Nitrate", "Temperature",
+                              "AOU", "POC", "Chlorophyll a")) +
     scale_shape_manual(values = c("ESNP" = 19, "ESNP-total" = 1)) + 
     scale_fill_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
                                  "Indirect Environ." = "darkcyan")) +
     scale_colour_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
                                  "Indirect Environ." = "darkcyan")) +
-    # scale_fill_viridis() +
-    # scale_color_viridis() +
-    xlab("") +
-    #scale_alpha_continuous(range = c(0.5, 1)) +
     scale_alpha_manual(values = c(1, 1)) +
-    theme(legend.title = element_blank(), legend.position = "top") +
-    #geom_smooth(formula = y ~ poly(x, 4), na.rm = TRUE) +
-    #ylim(-0.6, 1) +
+    theme(legend.title = element_blank(), legend.position = "top", 
+          axis.text.y = element_blank(), plot.title = element_text(size = 6, face = "bold")) +
+    ylim(-0.3, 0.75) +
+    ylab("") +
     xlab("")
   
   return(OutputPlot)
@@ -384,7 +424,7 @@ pdf(file = "Coefficients.pdf",   # The directory you want to save the file in
     height = 6) # The height of the plot in inches
 
 
-ggarrange(RFplot, MLRplot, common.legend = TRUE)
+esnp.plots <- ggarrange(RFplot, MLRplot, common.legend = TRUE)
 
 
 dev.off()
@@ -395,35 +435,40 @@ dev.off()
 # Compare Random Forest model with multiple linear regression models: Different style:
 ```{r}
 
-# First, derive multiple linear regression models (MLRs) from the dataset:
+
+# Restyle the RF:
+RFplot2 <- ggplot(imp, aes(x=reorder(varnames, IncMSE.percent), 
+                          y = IncMSE.percent, fill = IncMSE.percent, colour = IncMSE.percent)) + 
+  geom_point(size = 5, pch = 21) +
+  geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = IncMSE.percent)) +
+  scale_fill_viridis(option = 'D') +
+  scale_colour_viridis(option = 'D') +
+  ylab("Mean Decrease Accuracy (%)") +
+  xlab("") +
+  scale_x_discrete(limits = c(
+                              "Salinity", "SRD", "Wind speed", "24h-PAR", "MLD",
+                              "Silicic Acid","Phosphate", "Nitrate", "Temperature",
+                              "AOU", "POC", "Chlorophyll a")) +
+  coord_flip() +
+  theme_bw() +
+  ggtitle("ESNP: Random Forest Regression") +
+  theme(panel.grid.major.y = element_blank(), legend.title = element_blank(), legend.position = "bottom")
+
+##--------
 
 # Final model versions:
-ESNP.final.model <- lm(TEP ~ Log_Chl + Temperature + Nitrate + DO_Prod, 
+ESNP.final.model <- lm(TEP ~ Log_Chl + Temperature + Nitrate + DO_Prod + MLD, 
                           data = as.data.frame(scale(
                             pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
-ESNP.alt.model <- lm(TEP ~ POC + MLD + Phosphate + DO_Prod + WS, 
+ESNP.alt.model <- lm(TEP ~ Log_Chl + Temperature + DO_Prod + MLD #+ Nitrate 
+                     + POC + WS + Phosphate, 
                           data = as.data.frame(scale(
                             pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
-
-ESNP.alt.model2 <- lm(TEP ~ Log_Chl + Temperature + DO_Prod + MLD #+ Nitrate 
-                     + POC + WS + SRD + Sat_PAR + Phosphate + Silicate + Salinity + Seasons, 
-                          data = as.data.frame(scale(
-                            pacific.learning.ds[, sapply(pacific.learning.ds, is.numeric)]))) #ESNP
-
-
-# ESNP.alt.model <- lm(TEP ~ POC + MLD + Phosphate + DO_Prod + WS,
-#                           data = pacific.learning.ds)
-# 
-# summary(ESNP.alt.model)  # summary
-# ModelVal(ESNP.alt.modell, pacific.learning.ds)  # plots
-# car::vif(ESNP.alt.model)  # multi-collinearity
-# ols_test_normality(resid(ESNP.alt.model))  # normality
-# plot(ESNP.alt.model)
 
 # List models:
-model_list <- list(ESNP.final.model, ESNP.alt.model, ESNP.alt.model2)
-model_names <- c("ESNP", "ESNP", "ESNP")
-model_level <- c("ESNP", "ESNP-total", "ESNP-blank")
+model_list <- list(ESNP.final.model, ESNP.alt.model)
+model_names <- c("ESNP", "ESNP")
+model_level <- c("ESNP", "ESNP-total")
 
 
 CoefficientPlot <- function(models, alpha = 0.1, 
@@ -451,9 +496,9 @@ CoefficientPlot <- function(models, alpha = 0.1,
   colnames(MatrixofModels) <- c("IV", "Estimate", "StandardError", 
                                 "TValue", "PValue", "ModelName", "ModelLevel")
   MatrixofModels$ModelLevel = factor(MatrixofModels$ModelLevel, 
-                                    levels = c("ESNP", "ESNP-total", "ESNP-blank"))
+                                    levels = c("ESNP", "ESNP-total"))
   MatrixofModels$ModelName = factor(MatrixofModels$ModelName, 
-                                    levels = c("ESNP", "ESNP-total", "ESNP-blank"))
+                                    levels = c("ESNP", "ESNP-total"))
   #MatrixofModels$IV <- factor(MatrixofModels$IV, levels = MatrixofModels$IV)
   #MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
   MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
@@ -472,29 +517,19 @@ CoefficientPlot <- function(models, alpha = 0.1,
     ggtitle("Multiple Linear Regression") +
     #geom_point(colour = 'black') +
     scale_x_discrete(limits = c(
-                                "Salinity", "SRD", "PAR", "Seasons",
-                                "WS", "MLD",
+                                "Salinity", "SRD", "WS", "Sat_PAR", "MLD",
                                 "Silicate", "Phosphate", "Nitrate", "Temperature",
-                                "DO_Prod", "POC", "Log_Chl"),
-                     labels = c("Salinity", "SRD", "24h-PAR", "Season",
-                                "WS", "MLD",
-                                "Silicic acid", "Phosphate", "Nitrate", "Temperature",
-                                "AOU", "POC", "Chlorophyll a (log)")) +
-    #scale_shape_manual(values = c("ESNP" = 19, "ESNP-total" = 17)) + 
-    scale_colour_viridis(option = 'D') +
+                                "DO_Prod", "POC", "Log_Chl"), 
+                     labels = c(
+                              "Salinity", "SRD", "Wind speed", "24h-PAR", "MLD",
+                              "Silicic Acid","Phosphate", "Nitrate", "Temperature",
+                              "AOU", "POC", "Chlorophyll a")) +
+    scale_shape_manual(values = c("ESNP" = 19, "ESNP-total" = 1)) + 
     scale_fill_viridis(option = 'D') +
-    # scale_fill_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
-    #                              "Indirect Environ." = "darkcyan")) +
-    # scale_colour_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
-    #                              "Indirect Environ." = "darkcyan")) +
-    # scale_fill_viridis() +
-    # scale_color_viridis() +
-    #scale_alpha_continuous(range = c(0.5, 1)) +
-    scale_alpha_manual(values = c(1, 1, 0)) +
-    theme(legend.title = element_blank(), legend.position = "top")
-    #geom_smooth(formula = y ~ poly(x, 4), na.rm = TRUE) +
-    #ylim(-0.6, 1) +
-    #xlab("")
+    scale_colour_viridis(option = 'D') +
+    xlab("") +
+    scale_alpha_manual(values = c(1, 1)) +
+    theme(legend.title = element_blank(), legend.position = "bottom")
   
   return(OutputPlot)
 }
@@ -509,13 +544,10 @@ driver <- c("Source", "Source", "Direct Environ.", "Direct Environ.",
                 "Direct Environ.", "Source", "Indirect Environ.", # nuts
                 #"Direct Environ.", 
                 "Source", "Indirect Environ.",
-                "Indirect Environ.", "Indirect Environ.", "Direct Environ.", "Direct Environ.",
-                "Indirect Environ.", "Indirect Environ.", "Indirect Environ.",
-                "Source", 
-                "Direct Environ.", "Source", "Indirect Environ.")  #  driver categories
+                "Direct Environ.")  #  driver categories
 
-# order: Log_Chl, Temperature, Nitrate, DO_Prod, MLD, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS, SRD,
-# Sat_PAR, Phosphate, Silicate, Salinity, Seasons
+# order: Log_Chl, Temperature, Nitrate, DO_Prod, MLD, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS,
+# Phosphate
 
 # print the pdf:
 pdf(file = "Coefficients.pdf",   # The directory you want to save the file in
@@ -523,7 +555,7 @@ pdf(file = "Coefficients.pdf",   # The directory you want to save the file in
     height = 6) # The height of the plot in inches
 
 
-ggarrange(RFplot, MLRplot, common.legend = TRUE)
+ggarrange(RFplot2, MLRplot, common.legend = FALSE)
 
 
 dev.off()
@@ -533,5 +565,165 @@ dev.off()
 
 
 
+# Total data set model comparison:
+```{r}
+
+
+all.final.model <- lm(TEP ~ Log_Chl + MLD + Temperature + Nitrate, 
+                          data = as.data.frame(scale(
+                            all.learning.ds[, sapply(all.learning.ds, is.numeric)]))) #ESNP
+
+summary(all.final.model)
+car::vif(all.final.model)  # multi-collinearity
+ols_test_normality(resid(all.final.model))
+plot(all.final.model)
+
+
+all.final.model2 <- lm(TEP ~ Log_Chl + POC + MLD + DO_Prod + Temperature + Nitrate, 
+                          data = as.data.frame(scale(
+                            all.learning.ds[, sapply(all.learning.ds, is.numeric)]))) #ESNP
+
+all.final.model3 <- lm(TEP ~ Log_Chl + MLD + DO_Prod + Temperature + Nitrate, 
+                          data = as.data.frame(scale(
+                            all.learning.ds[, sapply(all.learning.ds, is.numeric)]))) #ESNP
+
+
+AIC(all.final.model, all.final.model2, all.final.model3)
+
+```
+
+
+
+# All data: MLR
+```{r}
+
+# First, derive multiple linear regression models (MLRs) from the dataset:
+
+# Use Final model versions 1 & 2 from above chunk:
+
+
+# List models:
+model_list.all <- list(all.final.model, all.final.model2)
+model_names.all <- c("all", "all")
+model_level.all <- c("all", "all2")
+
+
+CoefficientPlot <- function(models, alpha = 0.1, 
+                            modelnames = model_names.all, modellevel = model_level.all){
+  # models must be a list()
+
+  Multiplier <- qnorm(1 - alpha / 2)
+  CoefficientTables <- lapply(models, function(x){summary(x)$coef})
+  TableRows <- unlist(lapply(CoefficientTables, nrow))
+
+  if(modelnames[1] == ""){
+    ModelNameLabels <- rep(paste("Model", 1:length(TableRows)), TableRows)
+    } else {
+    ModelNameLabels <- rep(modelnames, TableRows)
+    }
+  
+    if(modellevel[1] == ""){
+    ModelLevelLabels <- rep(paste("Level", 1:length(TableRows)), TableRows)
+    } else {
+    ModelLevelLabels <- rep(modellevel, TableRows)
+    }
+
+  MatrixofModels <- cbind(do.call(rbind, CoefficientTables), ModelNameLabels, ModelLevelLabels)
+  MatrixofModels <- data.frame(cbind(rownames(MatrixofModels), MatrixofModels, ModelLevelLabels))
+  colnames(MatrixofModels) <- c("IV", "Estimate", "StandardError", 
+                                "TValue", "PValue", "ModelName", "ModelLevel")
+  MatrixofModels$ModelLevel = factor(MatrixofModels$ModelLevel, 
+                                    levels = c("all", "all2"))
+  MatrixofModels$ModelName = factor(MatrixofModels$ModelName, 
+                                    levels = c("all", "all2"))
+  #MatrixofModels$IV <- factor(MatrixofModels$IV, levels = MatrixofModels$IV)
+  #MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
+  MatrixofModels[, -c(1, 6, 7)] <- apply(MatrixofModels[, -c(1, 7)], 2, function(x){as.numeric(as.character(x))})
+
+  OutputPlot <- qplot(IV, Estimate, 
+                      ymin = Estimate - Multiplier * StandardError,
+                      ymax = Estimate + Multiplier * StandardError,
+                      data = MatrixofModels, geom = "pointrange", 
+                      ylab = NULL, xlab = NULL, 
+                      group = ModelLevel, shape = ModelLevel, alpha = ModelLevel,
+                      colour = driver, fill = driver, size = I(1)) +
+    geom_hline(yintercept = 0, lwd = I(7/12), colour = I(hsv(0/12, 7/12, 7/12)), 
+              alpha = I(5/12)) +
+    coord_flip() + theme_bw() +
+    theme(panel.grid.major.y = element_blank(), legend.title = element_blank()) +
+    ggtitle("Total Scope: Multiple Linear Regression") +
+    #geom_point(colour = 'black') +
+    scale_x_discrete(limits = c(
+                                "Area", "Salinity", "WS", "MLD",
+                                "Silicate", "Phosphate", "Nitrate", "Temperature",
+                                "DO_Prod", "POC", "Log_Chl"), 
+                     labels = c(
+                              "Area", "Salinity", "Wind speed", "MLD",
+                              "Silicic Acid","Phosphate", "Nitrate", "Temperature",
+                              "AOU", "POC", "Chlorophyll a")) +
+    scale_shape_manual(values = c("all" = 19, "all2" = 1)) + 
+    scale_fill_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
+                                 "Indirect Environ." = "darkcyan")) +
+    scale_colour_manual(values = c("Source" = "yellow4", "Direct Environ." = "blue", 
+                                 "Indirect Environ." = "darkcyan")) +
+    xlab("") +
+    ylim(-0.3, 0.75) +
+    scale_alpha_manual(values = c(1, 1)) +
+    theme(legend.title = element_blank(), legend.position = "none", 
+          axis.text.y = element_blank(), 
+          plot.title = element_text(size = 6, face = "bold")) +
+    xlab("")
+  
+  return(OutputPlot)
+}
+
+
+MLRplot.all <- CoefficientPlot(model_list.all)
+
+# Choose the color scheme corresponding to each parameter:
+# driver <- c("Indirect Environ.", "Source", "Indirect Environ.", "Direct Environ.",
+#                 "Source", "Source", "Source",
+#                 "Source", "Inirect Environ.", "Direct Environ.", "Direct Environ.", "Source")  #  driver categories
+
+driver <- c("Source", "Source", 
+            "Indirect Environ.", # MLD
+            "Direct Environ.", # Temperature
+            "Direct Environ.", # Nitrate
+            "Direct Environ.", # Temp
+            "Source", # Chl?
+            "Source",# POC
+            "Indirect Environ.", # MLD
+            "Source",  # AOU
+            "Direct Environ.", "Direct Environ.") # T, N
+
+# order: Log_Chl, Temperature, Nitrate, DO_Prod, MLD, Log_Chl, Temperature, DO_Prod, MLD, Nitrate, POC, WS,
+# Phosphate
+
+
+all.plots <- ggarrange(RFplot.all, MLRplot.all)
+
+
+
+
+```
+
+# Compare all plots:
+```{r}
+
+# print the pdf:
+pdf(file = "Coefficients.pdf",   # The directory you want to save the file in
+    width = 12, # The width of the plot in inches
+    height = 10) # The height of the plot in inches
+
+
+ggarrange(esnp.plots, all.plots, ncol = 1)
+
+
+dev.off()
+
+
+
+
+```
 
 
